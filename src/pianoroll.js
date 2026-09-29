@@ -111,9 +111,9 @@ class FLPianoRoll {
     this.scrollY = 0;
     this.zoomX = globalZoomX;
     this.rowHeight = globalRowHeight;
-    this.minPitch = 48;
-    this.maxPitch = 72;
-    this.pitchRange = 24;
+    this.minPitch = 21;
+    this.maxPitch = 108;
+    this.pitchRange = 88;
 
     // Register instance for global sync
     registeredRolls.add(this);
@@ -256,10 +256,12 @@ class FLPianoRoll {
       return;
     }
 
-    // Auto-fit vertical pitch range
-    // 2 semitones padding top and bottom, bounded to 88 piano keys (21 = A0, 108 = C8)
-    this.minPitch = Math.max(21, musicData.minPitch - 2);
-    this.maxPitch = Math.min(108, musicData.maxPitch + 2);
+    // Full standard 88-key piano range (A0 = 21 to C8 = 108)
+    // Always provides full octave navigation across all 7+ octaves
+    const noteMin = (musicData && typeof musicData.minPitch === 'number') ? musicData.minPitch : 60;
+    const noteMax = (musicData && typeof musicData.maxPitch === 'number') ? musicData.maxPitch : 60;
+    this.minPitch = Math.min(21, Math.max(12, noteMin - 2));
+    this.maxPitch = Math.max(108, Math.min(127, noteMax + 2));
     this.pitchRange = this.maxPitch - this.minPitch + 1;
 
     // Apply current global zoom
@@ -298,16 +300,23 @@ class FLPianoRoll {
       tempo: 120,
       beatsPerMeasure: 4,
       totalBeats: 16,
-      minPitch: 48,
-      maxPitch: 72,
+      minPitch: 21,
+      maxPitch: 108,
       notes: []
     };
-    this.minPitch = 48; // C3
-    this.maxPitch = 72; // C5
-    this.pitchRange = 25;
+    this.minPitch = 21; // A0 (88-key standard piano bottom)
+    this.maxPitch = 108; // C8 (88-key standard piano top)
+    this.pitchRange = 88;
     this.currentBeat = 0;
     this.activePitches.clear();
     this.scrollX = 0;
+
+    // Center view on Middle C (C4, MIDI 60)
+    const availableGridH = (this.container && this.container.clientHeight && this.container.clientHeight > 100 ? this.container.clientHeight : this.options.height) - this.options.rulerHeight - this.options.scrollbarHeight;
+    const centerRow = this.maxPitch - 60;
+    const centerPixelY = centerRow * this.rowHeight;
+    this.scrollY = Math.max(0, centerPixelY - (availableGridH / 2));
+
     this.clampScroll();
     this.render();
   }
@@ -605,9 +614,9 @@ class FLPianoRoll {
             velocity: 80
           };
           this.musicData.notes.push(newNote);
-          // Keep vertical range visible
-          this.minPitch = Math.min(this.minPitch, Math.max(21, pitch - 2));
-          this.maxPitch = Math.max(this.maxPitch, Math.min(108, pitch + 2));
+          // Keep vertical range visible if user places notes outside standard 88 keys
+          this.minPitch = Math.min(this.minPitch, Math.max(12, pitch - 2));
+          this.maxPitch = Math.max(this.maxPitch, Math.min(127, pitch + 2));
           this.pitchRange = this.maxPitch - this.minPitch + 1;
           this.musicData.totalBeats = Math.max(16, Math.max(this.musicData.totalBeats, beat + duration + 4));
 
