@@ -615,77 +615,144 @@ function notesToABC(notes, options = {}) {
     return header + '| z8 | z8 |\n';
   }
 
-  // Strictly quantize all note timings to clean musical fractions (1/16th note steps)
+  // Strictly quantize all note timings to clean musical fractions
   const cleanNotes = notes.map(n => ({
     pitch: n.pitch,
     startBeat: Math.max(0, quantize(n.startBeat, 0.25)),
     duration: Math.max(0.25, quantize(n.duration, 0.25))
-  })).sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch);
+  })).sort((a, b) => a.startBeat - b.startBeat || b.pitch - a.pitch);
 
-  // Group notes into simultaneous time steps
-  const groups = [];
-  let currentGroup = null;
+  // Partition notes into non-overlapping voice layers
+  // Notes at the same startBeat with same duration form chords within one voice
+  // Notes at the same startBeat with different durations go to separate voices
+  const voices = partitionNotesIntoVoices(cleanNotes);
 
+  // Find total length (pad to full measures)
+  let maxBeat = 0;
   for (const n of cleanNotes) {
-    if (!currentGroup || Math.abs(currentGroup.startBeat - n.startBeat) > 0.05) {
-      currentGroup = {
-        startBeat: n.startBeat,
-        notes: [n]
-      };
-      groups.push(currentGroup);
-    } else {
-      currentGroup.notes.push(n);
+    maxBeat = Math.max(maxBeat, n.startBeat + n.duration);
+  }
+  const paddedTotal = Math.max(beatsPerMeasure, Math.ceil(maxBeat / beatsPerMeasure) * beatsPerMeasure);
+
+  if (voices.length === 1) {
+    // Single voice: no V: directives needed
+    return header + formatSingleVoiceABC(voices[0], paddedTotal, beatsPerMeasure) + '\n';
+  }
+
+  // Multiple voices: use V: directives
+  let body = '';
+  voices.forEach((v, idx) => {
+    body += `V:${idx + 1}\n` + formatSingleVoiceABC(v, paddedTotal, beatsPerMeasure) + '\n';
+  });
+  return header + body;
+}
+
+/**
+ * Partitions notes into voice layers where each voice contains
+ * only non-overlapping notes (or same-start same-duration chords).
+ */
+function partitionNotesIntoVoices(notes) {
+  const voices = [];
+
+  for (const n of notes) {
+    let placed = false;
+    for (const v of voices) {
+      // Check if any note in this voice starts at the same beat
+      const sameStart = v.filter(vn => Math.abs(vn.startBeat - n.startBeat) < 0.05);
+      if (sameStart.length > 0) {
+        // Can only join this voice if duration matches (forms a chord)
+        if (Math.abs(sameStart[0].duration - n.duration) < 0.05) {
+          v.push(n);
+          placed = true;
+          break;
+        }
+        // Different duration at same beat -> must go to another voice
+      } else {
+        // Check for time overlap with any existing note in this voice
+        const overlaps = v.some(vn => {
+          const vEnd = vn.startBeat + vn.duration;
+          const nEnd = n.startBeat + n.duration;
+          return (n.startBeat < vEnd - 0.05) && (nEnd > vn.startBeat + 0.05);
+        });
+        if (!overlaps) {
+          v.push(n);
+          placed = true;
+          break;
+        }
+      }
+    }
+    if (!placed) {
+      voices.push([n]);
     }
   }
+  return voices;
+}
+
+/**
+ * Formats a single voice's notes as an ABC music body string.
+ * Handles chords, rests, and measure barlines.
+ */
+function formatSingleVoiceABC(notes, totalBeats, beatsPerMeasure) {
+  // Group notes by startBeat into chord groups
+  const groups = [];
+  for (const n of notes) {
+    let g = groups.find(x => Math.abs(x.startBeat - n.startBeat) < 0.05);
+    if (!g) {
+      g = { startBeat: n.startBeat, duration: n.duration, pitches: [] };
+      groups.push(g);
+    }
+    g.pitches.push(n.pitch);
+  }
+  groups.sort((a, b) => a.startBeat - b.startBeat);
 
   let body = '| ';
   let currentBeat = 0;
 
   for (let i = 0; i < groups.length; i++) {
-    const group = groups[i];
+    const g = groups[i];
 
-    // Check for rest before this group
-    while (group.startBeat > currentBeat + 0.05) {
+    // Fill rests before this group, respecting barlines
+    while (g.startBeat > currentBeat + 0.05) {
       const nextBarBeat = (Math.floor(currentBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
-      const restBeats = Math.min(group.startBeat - currentBeat, nextBarBeat - currentBeat);
-      const cleanRestBeats = quantize(restBeats, 0.25);
-
-      if (cleanRestBeats > 0) {
-        body += formatABCRest(cleanRestBeats);
-      }
-      currentBeat = quantize(currentBeat + cleanRestBeats, 0.25);
-
-      if (Math.abs(currentBeat - nextBarBeat) < 0.05) {
+      const restBeats = Math.min(g.startBeat - currentBeat, nextBarBeat - currentBeat);
+      const cleanRest = quantize(restBeats, 0.25);
+      if (cleanRest > 0) body += formatABCRest(cleanRest);
+      currentBeat = quantize(currentBeat + cleanRest, 0.25);
+      if (Math.abs(currentBeat - nextBarBeat) < 0.05 && g.startBeat > currentBeat + 0.05) {
         body += '| ';
       }
     }
 
-    // Format single note or chord
-    if (group.notes.length === 1) {
-      const n = group.notes[0];
-      body += midiToABCPitch(n.pitch) + formatABCDuration(n.duration) + ' ';
+    // Format note or chord
+    if (g.pitches.length === 1) {
+      body += midiToABCPitch(g.pitches[0]) + formatABCDuration(g.duration) + ' ';
     } else {
-      const maxDur = Math.max(...group.notes.map(n => n.duration));
-      const durStr = formatABCDuration(maxDur);
-      const notesStr = group.notes.map(n => midiToABCPitch(n.pitch)).join(' ');
-      body += `[${notesStr}]${durStr} `;
+      const notesStr = g.pitches.map(midiToABCPitch).join(' ');
+      body += `[${notesStr}]${formatABCDuration(g.duration)} `;
     }
+    currentBeat = quantize(currentBeat + g.duration, 0.25);
 
-    const groupDur = quantize(Math.max(...group.notes.map(n => n.duration)), 0.25);
-    currentBeat = quantize(currentBeat + groupDur, 0.25);
-
-    // Check measure boundary
+    // Barline check
     const measureRem = currentBeat % beatsPerMeasure;
-    if (Math.abs(measureRem) < 0.05 && i < groups.length - 1) {
+    if (Math.abs(measureRem) < 0.05 && (i < groups.length - 1 || currentBeat < totalBeats - 0.05)) {
       body += '| ';
     }
   }
 
-  if (!body.trim().endsWith('|')) {
-    body += '|';
+  // Pad remaining beats with rests to fill measures
+  while (totalBeats > currentBeat + 0.05) {
+    const nextBarBeat = (Math.floor(currentBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
+    const restBeats = Math.min(totalBeats - currentBeat, nextBarBeat - currentBeat);
+    const cleanRest = quantize(restBeats, 0.25);
+    if (cleanRest > 0) body += formatABCRest(cleanRest);
+    currentBeat = quantize(currentBeat + cleanRest, 0.25);
+    if (Math.abs(currentBeat - nextBarBeat) < 0.05 && currentBeat < totalBeats - 0.05) {
+      body += '| ';
+    }
   }
 
-  return header + body + '\n';
+  if (!body.trim().endsWith('|')) body += '||';
+  return body.trim();
 }
 
 /**
@@ -1311,6 +1378,8 @@ if (typeof module !== 'undefined' && module.exports) {
     extractAllABC,
     extractABC,
     notesToABC,
+    partitionNotesIntoVoices,
+    formatSingleVoiceABC,
     midiToABCPitch,
     formatABCDuration,
     NotebookLMComposer,
