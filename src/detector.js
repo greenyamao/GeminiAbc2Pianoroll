@@ -313,12 +313,31 @@ function createPianoRollWidget(abcString, originalHostElement) {
   `;
   const volSlider = volPill.querySelector('.fl-vol-slider');
 
+  // Vertical Zoom Pill (↕ Zoom buttons)
+  const zoomPill = document.createElement('div');
+  zoomPill.className = 'fl-tool-pill fl-zoom-pill';
+  zoomPill.title = 'Vertical Zoom (Key Height)\n• Click − / + to scale\n• Or scroll wheel over the piano keys!';
+  zoomPill.innerHTML = `
+    <span class="fl-tool-icon">↕</span>
+    <button type="button" class="fl-btn-mini fl-zoom-btn-out" title="Make keys smaller (−)">−</button>
+    <button type="button" class="fl-btn-mini fl-zoom-btn-in" title="Make keys taller (+)">+</button>
+  `;
+  zoomPill.querySelector('.fl-zoom-btn-out').onclick = (e) => {
+    e.stopPropagation();
+    pianoRoll.setZoomY(-2);
+  };
+  zoomPill.querySelector('.fl-zoom-btn-in').onclick = (e) => {
+    e.stopPropagation();
+    pianoRoll.setZoomY(2);
+  };
+
   // Shortcuts Info Button (Icon with rich multi-line tooltip)
   const shortcutsBtn = document.createElement('button');
   shortcutsBtn.className = 'fl-btn fl-btn-icon';
   shortcutsBtn.innerHTML = '⌨';
-  shortcutsBtn.title = 'Keyboard Shortcuts:\n• Space: Play / Pause\n• Ctrl + Wheel: Horizontal Zoom (Time)\n• Alt + Wheel: Vertical Zoom (Keys)\n• Shift + Wheel: Horizontal Scroll\n• Click/Drag: Pan & Seek';
+  shortcutsBtn.title = 'Navigation & Shortcuts:\n• Wheel over Keys: Vertical Zoom (Key height)\n• Wheel over Ruler: Horizontal Zoom (Time)\n• Wheel over Grid: Vertical Scroll\n• Ctrl + Wheel: Horizontal Zoom\n• Shift + Wheel: Horizontal Scroll\n• Drag bottom bar: Resize height\n• Space: Play / Pause';
 
+  rightGroup.appendChild(zoomPill);
   rightGroup.appendChild(exprPill);
   rightGroup.appendChild(volPill);
   rightGroup.appendChild(shortcutsBtn);
@@ -346,6 +365,43 @@ function createPianoRollWidget(abcString, originalHostElement) {
     synth: synth
   });
   pianoRoll.setData(musicData);
+
+  // Bottom Resize Handle (drag to adjust height)
+  const resizeHandle = document.createElement('div');
+  resizeHandle.className = 'fl-resize-handle';
+  resizeHandle.title = 'Drag to resize piano roll height | Double-click to reset (280px)';
+
+  let isResizingH = false;
+  let startResizeY = 0;
+  let startH = 0;
+
+  resizeHandle.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    isResizingH = true;
+    startResizeY = e.clientY;
+    startH = pianoRoll.options.height || 280;
+    document.body.style.cursor = 'ns-resize';
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!isResizingH) return;
+    const dy = e.clientY - startResizeY;
+    const newH = Math.max(180, Math.min(750, startH + dy));
+    pianoRoll.setHeight(newH);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (isResizingH) {
+      isResizingH = false;
+      document.body.style.cursor = '';
+    }
+  });
+
+  resizeHandle.addEventListener('dblclick', () => {
+    pianoRoll.setHeight(280);
+  });
+
+  widget.appendChild(resizeHandle);
 
   // Wire up audio playback callbacks
   synth.onProgress = (currentBeat, activePitches) => {
@@ -1057,6 +1113,24 @@ class NotebookLMComposer {
         <input type="range" class="fl-vol-slider" min="0" max="1" step="0.05" value="${globalVolume}">
       `;
 
+      const zoomPill = document.createElement('div');
+      zoomPill.className = 'fl-tool-pill fl-zoom-pill';
+      zoomPill.title = 'Vertical Zoom (Key Height)\n• Click − / + to scale\n• Or scroll wheel over the piano keys!';
+      zoomPill.innerHTML = `
+        <span class="fl-tool-icon">↕</span>
+        <button type="button" class="fl-btn-mini fl-zoom-btn-out" title="Make keys smaller (−)">−</button>
+        <button type="button" class="fl-btn-mini fl-zoom-btn-in" title="Make keys taller (+)">+</button>
+      `;
+      zoomPill.querySelector('.fl-zoom-btn-out').onclick = (e) => {
+        e.stopPropagation();
+        if (this.pianoRoll) this.pianoRoll.setZoomY(-2);
+      };
+      zoomPill.querySelector('.fl-zoom-btn-in').onclick = (e) => {
+        e.stopPropagation();
+        if (this.pianoRoll) this.pianoRoll.setZoomY(2);
+      };
+
+      rightGroup.appendChild(zoomPill);
       rightGroup.appendChild(snapPill);
       rightGroup.appendChild(exprPill);
       rightGroup.appendChild(volPill);

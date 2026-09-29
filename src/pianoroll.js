@@ -32,7 +32,7 @@ function broadcastGlobalZoom(newZoomX, newRowHeight) {
     try { localStorage.setItem('fl_global_zoom_x', globalZoomX.toString()); } catch (e) {}
   }
   if (newRowHeight !== undefined) {
-    globalRowHeight = Math.max(10, Math.min(36, newRowHeight));
+    globalRowHeight = Math.max(8, Math.min(36, newRowHeight));
     try { localStorage.setItem('fl_global_row_height', globalRowHeight.toString()); } catch (e) {}
   }
   for (const roll of registeredRolls) {
@@ -269,10 +269,10 @@ class FLPianoRoll {
     this.rowHeight = globalRowHeight;
     this.zoomX = globalZoomX;
 
-    // Calculate height to display notes comfortably
-    // When there are 3-4 octaves (e.g. 9th chord + bass, or SATB voices), allow height to expand up to 400px
-    const neededGridHeight = (this.pitchRange * this.rowHeight) + this.options.rulerHeight + this.options.scrollbarHeight;
-    this.options.height = Math.max(260, Math.min(400, neededGridHeight));
+    // Maintain configured height or default comfortably
+    if (!this.options.height) {
+      this.options.height = 280;
+    }
     this.canvas.style.height = `${this.options.height}px`;
     this.updateCanvasDimensions();
 
@@ -383,12 +383,17 @@ class FLPianoRoll {
   }
 
   applyGlobalZoom(zX, rH) {
-    this.zoomX = zX;
-    this.rowHeight = rH;
-    const neededGridHeight = (this.pitchRange * this.rowHeight) + this.options.rulerHeight + this.options.scrollbarHeight;
-    this.options.height = Math.max(240, Math.min(480, neededGridHeight));
+    if (zX !== undefined) this.zoomX = zX;
+    if (rH !== undefined) this.rowHeight = rH;
+    this.clampScroll();
+    this.render();
+  }
+
+  setHeight(newHeight) {
+    newHeight = Math.max(180, Math.min(750, newHeight));
+    this.options.height = newHeight;
     if (this.canvas) {
-      this.canvas.style.height = `${this.options.height}px`;
+      this.canvas.style.height = `${newHeight}px`;
       this.updateCanvasDimensions();
     }
     this.clampScroll();
@@ -907,9 +912,27 @@ class FLPianoRoll {
     // WHEEL SCROLLING & ZOOMING (FL Studio behavior)
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      const pos = this.getCanvasMousePos(e);
+      const kw = this.options.keyboardWidth;
+      const rh = this.options.rulerHeight;
 
+      // 1. Wheel over Piano Keyboard on the left -> Vertical Zoom (FL Studio behavior!)
+      if (pos.x <= kw) {
+        const delta = e.deltaY < 0 ? 2 : -2;
+        this.setZoomY(delta);
+        return;
+      }
+
+      // 2. Wheel over Timeline Ruler at top -> Horizontal Zoom (FL Studio behavior!)
+      if (pos.y <= rh && pos.x > kw) {
+        const delta = e.deltaY < 0 ? 6 : -6;
+        this.setZoom(delta);
+        return;
+      }
+
+      // 3. Modifier combinations
       if (e.altKey || (e.ctrlKey && e.shiftKey)) {
-        // Alt + Wheel (or Ctrl + Shift + Wheel) = Vertical Zoom!
+        // Alt + Wheel or Ctrl + Shift + Wheel = Vertical Zoom!
         const delta = e.deltaY < 0 ? 2 : -2;
         this.setZoomY(delta);
       } else if (e.ctrlKey) {
@@ -927,7 +950,7 @@ class FLPianoRoll {
         this.clampScroll();
         this.render();
       } else {
-        // Standard Wheel = Vertical Scroll
+        // Standard Wheel over grid = Vertical Scroll
         this.scrollY += Math.sign(e.deltaY) * (this.rowHeight * 1.5);
         this.clampScroll();
         this.render();
