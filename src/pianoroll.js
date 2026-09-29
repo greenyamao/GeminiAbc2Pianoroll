@@ -218,7 +218,9 @@ class FLPianoRoll {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     this.width = rect.width || this.container.clientWidth || 600;
-    this.height = this.options.height;
+    this.height = (this.container.clientHeight && this.container.clientHeight > 100) 
+      ? this.container.clientHeight 
+      : this.options.height;
 
     this.canvas.width = Math.round(this.width * dpr);
     this.canvas.height = Math.round(this.height * dpr);
@@ -1225,11 +1227,7 @@ class FLPianoRoll {
         this.ctx.fillText(noteLabel, x + 4, y + (h / 2));
       }
 
-      // If editable, draw a subtle handle on the right edge of each note
-      if (this.editable && w > 10) {
-        this.ctx.fillStyle = isHovered ? 'rgba(0, 0, 0, 0.45)' : 'rgba(0, 0, 0, 0.22)';
-        this.ctx.fillRect(x + w - 4, y, 3, h);
-      }
+
     }
   }
 

@@ -471,7 +471,7 @@ function processNotebookLMMessage(messageNode, immediate = true) {
       let targetEl = null;
 
       for (const el of candidates) {
-        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) continue;
+        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) continue;
         if (el.textContent && el.textContent.includes(firstLine)) {
           targetEl = el;
           break;
@@ -483,7 +483,7 @@ function processNotebookLMMessage(messageNode, immediate = true) {
         const musicLine = item.abcString.split('\n').find(l => l.includes('|') && /[A-Ga-g]/.test(l));
         if (musicLine) {
           for (const el of candidates) {
-            if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) continue;
+            if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) continue;
             if (el.textContent && el.textContent.includes(musicLine.trim())) {
               targetEl = el;
               break;
@@ -861,11 +861,26 @@ class NotebookLMComposer {
       }
     }
 
-    // 2. Create Drawer if not created yet
+    // 2. Create Modal Overlay if not created yet
     if (!this.drawer) {
       this.drawer = document.createElement('div');
-      this.drawer.className = 'fl-composer-drawer';
+      this.drawer.className = 'fl-composer-modal-overlay';
       this.drawer.style.display = 'none';
+
+      const modalWindow = document.createElement('div');
+      modalWindow.className = 'fl-composer-modal-window';
+
+      // Header with Title and Close button
+      const modalHeader = document.createElement('div');
+      modalHeader.className = 'fl-modal-header';
+      modalHeader.innerHTML = `
+        <div class="fl-modal-title-group">
+          <span class="fl-modal-title">🎹 FL Studio Piano Roll</span>
+          <span class="fl-modal-subtitle">Left click: draw / move | Right edge: resize | 🧲 Snap</span>
+        </div>
+        <button type="button" class="fl-modal-close-btn" title="Close (Esc)">✕</button>
+      `;
+      modalHeader.querySelector('.fl-modal-close-btn').onclick = () => this.toggle(false);
 
       // Toolbar
       const toolbar = document.createElement('div');
@@ -910,7 +925,7 @@ class NotebookLMComposer {
       leftGroup.appendChild(clearBtn);
       leftGroup.appendChild(lcd);
 
-      // Right section: Snap + Expression + Volume + Insert + Close
+      // Right section: Snap + Expression + Volume
       const rightGroup = document.createElement('div');
       rightGroup.className = 'fl-toolbar-right';
 
@@ -956,33 +971,70 @@ class NotebookLMComposer {
         <input type="range" class="fl-vol-slider" min="0" max="1" step="0.05" value="${globalVolume}">
       `;
 
-      const insertBtn = document.createElement('button');
-      insertBtn.className = 'fl-btn fl-btn-insert';
-      insertBtn.type = 'button';
-      insertBtn.innerHTML = '➤ Insert to Prompt';
-      insertBtn.title = 'Convert notes to ABC code and insert into chat prompt';
-
-      const closeBtn = document.createElement('button');
-      closeBtn.className = 'fl-btn fl-btn-icon';
-      closeBtn.type = 'button';
-      closeBtn.innerHTML = '✕';
-      closeBtn.title = 'Close Piano Roll (notes will be preserved)';
-      closeBtn.onclick = () => this.toggle(false);
-
       rightGroup.appendChild(snapPill);
       rightGroup.appendChild(exprPill);
       rightGroup.appendChild(volPill);
-      rightGroup.appendChild(insertBtn);
-      rightGroup.appendChild(closeBtn);
 
       toolbar.appendChild(leftGroup);
       toolbar.appendChild(rightGroup);
 
       const canvasWrap = document.createElement('div');
       canvasWrap.className = 'fl-canvas-wrap';
+      canvasWrap.style.flex = '1';
+      canvasWrap.style.height = '100%';
+      canvasWrap.style.minHeight = '360px';
+      canvasWrap.style.position = 'relative';
 
-      this.drawer.appendChild(toolbar);
-      this.drawer.appendChild(canvasWrap);
+      // Modal Footer with Cancel & Apply buttons
+      const modalFooter = document.createElement('div');
+      modalFooter.className = 'fl-modal-footer';
+      modalFooter.innerHTML = `
+        <div class="fl-modal-footer-info">FL Studio Engine • Strict Quantization</div>
+        <div class="fl-modal-footer-actions">
+          <button type="button" class="fl-btn-modal-cancel">✕ Cancel</button>
+          <button type="button" class="fl-btn-modal-apply">✔ Apply & Insert to Chat</button>
+        </div>
+      `;
+
+      const cancelBtn = modalFooter.querySelector('.fl-btn-modal-cancel');
+      cancelBtn.onclick = () => this.toggle(false);
+
+      const applyBtn = modalFooter.querySelector('.fl-btn-modal-apply');
+      applyBtn.onclick = () => {
+        const notes = (this.pianoRoll.musicData && this.pianoRoll.musicData.notes) || [];
+        if (notes.length === 0) {
+          this.toggle(false);
+          return;
+        }
+        const abc = notesToABC(notes, {
+          tempo: this.pianoRoll.musicData?.tempo || 120,
+          key: 'C',
+          meter: '4/4'
+        });
+        const markdown = '```abc\n' + abc.trim() + '\n```';
+        insertTextIntoNotebookLM(markdown);
+        this.toggle(false);
+      };
+
+      modalWindow.appendChild(modalHeader);
+      modalWindow.appendChild(toolbar);
+      modalWindow.appendChild(canvasWrap);
+      modalWindow.appendChild(modalFooter);
+      this.drawer.appendChild(modalWindow);
+
+      // Close on backdrop click
+      this.drawer.onclick = (e) => {
+        if (e.target === this.drawer) {
+          this.toggle(false);
+        }
+      };
+
+      // Close on Escape key
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.isOpen) {
+          this.toggle(false);
+        }
+      });
 
       this.synth = new PianoRollSynth({
         volume: globalVolume,
@@ -990,7 +1042,7 @@ class NotebookLMComposer {
       });
 
       this.pianoRoll = new FLPianoRoll(canvasWrap, {
-        height: 260,
+        height: 400,
         editable: true,
         synth: this.synth,
         onNotesChange: (notes) => {
@@ -1069,36 +1121,17 @@ class NotebookLMComposer {
         try { localStorage.setItem('nlm_fl_volume', val.toString()); } catch (err) {}
         this.synth.setVolume(val);
       };
-
-      insertBtn.onclick = () => {
-        const notes = (this.pianoRoll.musicData && this.pianoRoll.musicData.notes) || [];
-        const abc = notesToABC(notes, {
-          tempo: this.pianoRoll.musicData?.tempo || 120,
-          key: 'C',
-          meter: '4/4'
-        });
-        const markdown = '```abc\n' + abc.trim() + '\n```';
-        insertTextIntoNotebookLM(markdown);
-
-        insertBtn.innerHTML = '✔ Inserted!';
-        insertBtn.style.background = '#285e3a';
-        setTimeout(() => {
-          insertBtn.innerHTML = '➤ Insert to Prompt';
-          insertBtn.style.background = '';
-        }, 1500);
-      };
     }
 
-    const hostForm = inputContainer.closest('form.form, form') || inputContainer;
-    if (this.drawer.parentElement !== hostForm.parentElement) {
-      hostForm.parentElement.insertBefore(this.drawer, hostForm);
+    if (!document.body.contains(this.drawer)) {
+      document.body.appendChild(this.drawer);
     }
   }
 
   toggle(forceState) {
     this.isOpen = (forceState !== undefined) ? forceState : !this.isOpen;
     if (this.drawer) {
-      this.drawer.style.display = this.isOpen ? 'block' : 'none';
+      this.drawer.style.display = this.isOpen ? 'flex' : 'none';
     }
     if (this.toggleBtn) {
       this.toggleBtn.classList.toggle('is-active', this.isOpen);
@@ -1160,7 +1193,7 @@ class NotebookLMWatcher {
       for (const m of mutations) {
         // If mutation occurred inside our own widgets, IGNORE
         if (m.target && m.target.nodeType === Node.ELEMENT_NODE) {
-          if (m.target.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) {
+          if (m.target.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) {
             continue;
           }
         }
@@ -1169,8 +1202,9 @@ class NotebookLMWatcher {
           if (node.nodeType === Node.ELEMENT_NODE) {
             if (node.classList?.contains('fl-widget-container') ||
                 node.classList?.contains('fl-lazy-placeholder') ||
+                node.classList?.contains('fl-composer-modal-overlay') ||
                 node.classList?.contains('fl-composer-drawer') ||
-                node.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) {
+                node.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) {
               continue;
             }
 
@@ -1221,7 +1255,7 @@ class NotebookLMWatcher {
       // Also discover any other turn or message containers containing unprocessed ABC music
       const allDivs = document.querySelectorAll('div, section, article');
       for (const el of allDivs) {
-        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer, form')) continue;
+        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer, form')) continue;
         if (el.dataset?.flProcessed === 'true') continue;
         if (el.querySelector('.fl-widget-container, .fl-lazy-placeholder')) continue;
         const txt = el.textContent || '';

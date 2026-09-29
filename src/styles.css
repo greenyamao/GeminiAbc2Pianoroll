@@ -320,33 +320,156 @@
   color: #38bdf8;
 }
 
-/* FL Studio Chat Composer Drawer */
-.fl-composer-drawer {
-  background: var(--fl-bg-panel);
-  border: 1px solid var(--fl-border);
-  border-bottom: 2px solid #10161c;
-  border-radius: 8px 8px 0 0;
-  overflow: hidden;
-  box-shadow: 0 -6px 22px rgba(0, 0, 0, 0.45);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Google Sans", sans-serif;
-  color: var(--fl-text-main);
+/* FL Studio Chat Composer Modal Window */
+.fl-composer-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 16, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 999999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
   box-sizing: border-box;
-  width: 100%;
-  margin-bottom: 4px;
-  position: relative;
-  z-index: 50;
-  animation: flDrawerSlideUp 0.18s ease-out;
+  animation: flModalFadeIn 0.18s ease-out;
 }
 
-@keyframes flDrawerSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+@keyframes flModalFadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.fl-composer-modal-window {
+  background: var(--fl-bg-panel, #171d24);
+  border: 1px solid var(--fl-border, #334756);
+  border-radius: 12px;
+  width: 94vw;
+  max-width: 1140px;
+  height: 82vh;
+  max-height: 660px;
+  min-height: 480px;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Google Sans", sans-serif;
+  color: var(--fl-text-main, #d1d5db);
+}
+
+.fl-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #10161c;
+  border-bottom: 1px solid #23313d;
+  user-select: none;
+}
+
+.fl-modal-title-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fl-modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f3f4f6;
+  letter-spacing: 0.3px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fl-modal-subtitle {
+  font-size: 11px;
+  color: #64748b;
+  font-weight: 400;
+}
+
+.fl-modal-close-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #94a3b8;
+  font-size: 18px;
+  line-height: 1;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.fl-modal-close-btn:hover {
+  background: #3b1818;
+  border-color: #ef4444;
+  color: #f87171;
+}
+
+.fl-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: #10161c;
+  border-top: 1px solid #23313d;
+  box-sizing: border-box;
+}
+
+.fl-modal-footer-info {
+  font-size: 11px;
+  color: #64748b;
+}
+
+.fl-modal-footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fl-btn-modal-cancel {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #cbd5e1;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.fl-btn-modal-cancel:hover {
+  background: #273548;
+  color: #ffffff;
+}
+
+.fl-btn-modal-apply {
+  background: #183d25;
+  border: 1px solid #27693d;
+  color: #86efac;
+  padding: 6px 18px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.fl-btn-modal-apply:hover {
+  background: #205232;
+  border-color: #4ade80;
+  color: #ffffff;
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.25);
 }
 
 /* Toggle button in NotebookLM input bar */
