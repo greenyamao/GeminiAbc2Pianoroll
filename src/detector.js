@@ -485,6 +485,494 @@ function processNotebookLMMessage(messageNode, immediate = true) {
 }
 
 /**
+ * Converts note array into standard ABC notation
+ */
+function midiToABCPitch(midiPitch) {
+  const PITCH_MAP = [
+    { name: 'C', acc: '' },
+    { name: 'C', acc: '^' },
+    { name: 'D', acc: '' },
+    { name: 'D', acc: '^' },
+    { name: 'E', acc: '' },
+    { name: 'F', acc: '' },
+    { name: 'F', acc: '^' },
+    { name: 'G', acc: '' },
+    { name: 'G', acc: '^' },
+    { name: 'A', acc: '' },
+    { name: 'A', acc: '^' },
+    { name: 'B', acc: '' }
+  ];
+
+  const octave = Math.floor(midiPitch / 12) - 1;
+  const semitone = ((midiPitch % 12) + 12) % 12;
+  const p = PITCH_MAP[semitone];
+
+  let noteStr = '';
+  if (octave >= 5) {
+    noteStr = p.acc + p.name.toLowerCase();
+    const ticks = octave - 5;
+    if (ticks > 0) noteStr += "'".repeat(ticks);
+  } else if (octave === 4) {
+    noteStr = p.acc + p.name;
+  } else {
+    noteStr = p.acc + p.name;
+    const commas = 4 - octave;
+    noteStr += ",".repeat(commas);
+  }
+  return noteStr;
+}
+
+function formatABCDuration(durationInBeats) {
+  const units = Math.round(durationInBeats * 4) / 2; // L:1/8 -> 0.5 beat = 1 unit
+  if (units === 1) return '';
+  if (units === 0.5) return '/2';
+  if (units === 0.25) return '/4';
+  if (Number.isInteger(units) && units > 0) return units.toString();
+  return Math.max(1, Math.round(units)).toString();
+}
+
+function notesToABC(notes, options = {}) {
+  const key = options.key || 'C';
+  const meter = options.meter || '4/4';
+  const tempo = options.tempo || 120;
+  const beatsPerMeasure = 4;
+
+  const header = `X:1\nT:Melody\nM:${meter}\nL:1/8\nQ:1/4=${tempo}\nK:${key}\n`;
+  if (!notes || notes.length === 0) {
+    return header + '| z8 | z8 |\n';
+  }
+
+  // Sort notes by startBeat, then pitch
+  const sorted = [...notes].sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch);
+
+  // Group notes into simultaneous time steps
+  const groups = [];
+  let currentGroup = null;
+
+  for (const n of sorted) {
+    const roundedBeat = Math.round(n.startBeat * 4) / 4;
+    if (!currentGroup || Math.abs(currentGroup.startBeat - roundedBeat) > 0.05) {
+      currentGroup = {
+        startBeat: roundedBeat,
+        notes: [n]
+      };
+      groups.push(currentGroup);
+    } else {
+      currentGroup.notes.push(n);
+    }
+  }
+
+  let body = '| ';
+  let currentBeat = 0;
+
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+
+    // Check for rest before this group
+    while (group.startBeat > currentBeat + 0.05) {
+      const nextBarBeat = (Math.floor(currentBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
+      const restDuration = Math.min(group.startBeat - currentBeat, nextBarBeat - currentBeat);
+
+      const restUnits = Math.round(restDuration * 2);
+      if (restUnits > 0) {
+        body += (restUnits === 1 ? 'z ' : `z${restUnits} `);
+      }
+      currentBeat += restDuration;
+
+      if (Math.abs(currentBeat - nextBarBeat) < 0.05) {
+        body += '| ';
+      }
+    }
+
+    // Format single note or chord
+    if (group.notes.length === 1) {
+      const n = group.notes[0];
+      body += midiToABCPitch(n.pitch) + formatABCDuration(n.duration) + ' ';
+    } else {
+      const maxDur = Math.max(...group.notes.map(n => n.duration));
+      const durStr = formatABCDuration(maxDur);
+      const notesStr = group.notes.map(n => midiToABCPitch(n.pitch)).join(' ');
+      body += `[${notesStr}]${durStr} `;
+    }
+
+    const groupDur = Math.max(...group.notes.map(n => n.duration));
+    currentBeat += groupDur;
+
+    // Check measure boundary
+    const measureRem = currentBeat % beatsPerMeasure;
+    if (Math.abs(measureRem) < 0.05 && i < groups.length - 1) {
+      body += '| ';
+    }
+  }
+
+  if (!body.trim().endsWith('|')) {
+    body += '|';
+  }
+
+  return header + body + '\n';
+}
+
+/**
+ * Finds NotebookLM input prompt container
+ */
+function findNotebookLMInputContainer() {
+  const selectors = [
+    'query-box',
+    '.query-box',
+    '.query-bar',
+    '.chat-input-area',
+    '.chat-input-container',
+    '.input-box-container',
+    'form:has(textarea)',
+    'div:has(> textarea)',
+    'form:has([contenteditable])',
+    'div:has(> [contenteditable="true"])'
+  ];
+
+  for (const sel of selectors) {
+    try {
+      const el = document.querySelector(sel);
+      if (el) return el;
+    } catch (e) {}
+  }
+
+  const input = document.querySelector('textarea, [contenteditable="true"]');
+  if (input) {
+    return input.closest('form, .input-area, .chat-bar, .query-container') || input.parentElement;
+  }
+
+  return null;
+}
+
+/**
+ * Bulletproof prompt text inserter supporting textarea and contenteditable
+ */
+function insertTextIntoNotebookLM(textToInsert) {
+  const input = document.querySelector('query-box textarea, .query-box textarea, textarea, [contenteditable="true"]');
+  if (!input) {
+    if (navigator.clipboard) navigator.clipboard.writeText(textToInsert);
+    return false;
+  }
+
+  input.focus();
+
+  if (input.tagName === 'TEXTAREA' || input.tagName === 'INPUT') {
+    const curVal = input.value || '';
+    const start = input.selectionStart ?? curVal.length;
+    const end = input.selectionEnd ?? curVal.length;
+
+    const before = curVal.substring(0, start);
+    const after = curVal.substring(end);
+
+    const prefix = (before.length > 0 && !before.endsWith('\n')) ? '\n\n' : '';
+    const newText = before + prefix + textToInsert + '\n' + after;
+
+    const valueSetter = Object.getOwnPropertyDescriptor(input, 'value')?.set;
+    const prototype = Object.getPrototypeOf(input);
+    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
+    if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
+      prototypeValueSetter.call(input, newText);
+    } else if (valueSetter) {
+      valueSetter.call(input, newText);
+    } else {
+      input.value = newText;
+    }
+
+    const newPos = (before + prefix + textToInsert + '\n').length;
+    input.selectionStart = newPos;
+    input.selectionEnd = newPos;
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  } else if (input.isContentEditable) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const node = document.createTextNode(textToInsert + '\n');
+      range.insertNode(node);
+      range.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } else {
+      input.textContent += '\n' + textToInsert + '\n';
+    }
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  return true;
+}
+
+let activeComposer = null;
+
+class NotebookLMComposer {
+  constructor() {
+    this.drawer = null;
+    this.pianoRoll = null;
+    this.synth = null;
+    this.isOpen = false;
+    this.toggleBtn = null;
+    this.currentContainer = null;
+    this.lcdNotes = null;
+  }
+
+  init(inputContainer) {
+    if (this.currentContainer === inputContainer && this.drawer && document.body.contains(this.drawer)) {
+      return;
+    }
+    this.currentContainer = inputContainer;
+
+    // 1. Create or attach the Toggle Button in the input bar
+    if (!this.toggleBtn) {
+      this.toggleBtn = document.createElement('button');
+      this.toggleBtn.className = 'fl-input-composer-btn';
+      this.toggleBtn.type = 'button';
+      this.toggleBtn.innerHTML = '🎹 Piano Roll';
+      this.toggleBtn.title = 'Open interactive FL Studio Piano Roll composer';
+      this.toggleBtn.onclick = (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.toggle();
+      };
+    }
+
+    const btnRow = inputContainer.querySelector('.buttons, .actions, .controls, .bottom-row, .leading-actions') || inputContainer;
+    if (!btnRow.contains(this.toggleBtn)) {
+      btnRow.appendChild(this.toggleBtn);
+    }
+
+    // 2. Create Drawer if not created yet
+    if (!this.drawer) {
+      this.drawer = document.createElement('div');
+      this.drawer.className = 'fl-composer-drawer';
+      this.drawer.style.display = 'none';
+
+      // Toolbar
+      const toolbar = document.createElement('div');
+      toolbar.className = 'fl-toolbar';
+
+      // Left section: transport + clear + LCD
+      const leftGroup = document.createElement('div');
+      leftGroup.className = 'fl-toolbar-left';
+
+      const playBtn = document.createElement('button');
+      playBtn.className = 'fl-btn fl-btn-play';
+      playBtn.type = 'button';
+      playBtn.innerHTML = '▶ Play';
+
+      const stopBtn = document.createElement('button');
+      stopBtn.className = 'fl-btn fl-btn-stop';
+      stopBtn.type = 'button';
+      stopBtn.innerHTML = '⏹';
+      stopBtn.title = 'Stop and rewind';
+
+      const clearBtn = document.createElement('button');
+      clearBtn.className = 'fl-btn fl-btn-icon fl-btn-clear';
+      clearBtn.type = 'button';
+      clearBtn.innerHTML = '🗑 Clear';
+      clearBtn.title = 'Clear piano roll notes';
+
+      const lcd = document.createElement('div');
+      lcd.className = 'fl-lcd';
+      lcd.innerHTML = `
+        <span class="fl-lcd-key">C</span>
+        <span class="fl-lcd-sep"></span>
+        <span class="fl-lcd-meter">4/4</span>
+        <span class="fl-lcd-sep"></span>
+        <span class="fl-lcd-bpm">120<small>BPM</small></span>
+        <span class="fl-lcd-sep"></span>
+        <span class="fl-lcd-notes" style="color:#a5b4fc;">0 notes</span>
+      `;
+      this.lcdNotes = lcd.querySelector('.fl-lcd-notes');
+
+      leftGroup.appendChild(playBtn);
+      leftGroup.appendChild(stopBtn);
+      leftGroup.appendChild(clearBtn);
+      leftGroup.appendChild(lcd);
+
+      // Right section: Expression + Volume + Insert + Close
+      const rightGroup = document.createElement('div');
+      rightGroup.className = 'fl-toolbar-right';
+
+      const exprPill = document.createElement('div');
+      exprPill.className = 'fl-tool-pill';
+      exprPill.title = 'Piano Expression Dynamics';
+      exprPill.innerHTML = `
+        <span class="fl-tool-icon">🎹</span>
+        <select class="fl-expr-select">
+          <option value="soft" ${globalExpression === 'soft' ? 'selected' : ''}>Soft</option>
+          <option value="balanced" ${globalExpression === 'balanced' ? 'selected' : ''}>Balanced</option>
+          <option value="bright" ${globalExpression === 'bright' ? 'selected' : ''}>Bright</option>
+        </select>
+      `;
+
+      const volPill = document.createElement('div');
+      volPill.className = 'fl-tool-pill';
+      volPill.title = 'Master Volume';
+      volPill.innerHTML = `
+        <span class="fl-tool-icon">🔊</span>
+        <input type="range" class="fl-vol-slider" min="0" max="1" step="0.05" value="${globalVolume}">
+      `;
+
+      const insertBtn = document.createElement('button');
+      insertBtn.className = 'fl-btn fl-btn-insert';
+      insertBtn.type = 'button';
+      insertBtn.innerHTML = '➤ Insert to Prompt';
+      insertBtn.title = 'Convert notes to ABC code and insert into chat prompt';
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'fl-btn fl-btn-icon';
+      closeBtn.type = 'button';
+      closeBtn.innerHTML = '✕';
+      closeBtn.title = 'Close Piano Roll (notes will be preserved)';
+      closeBtn.onclick = () => this.toggle(false);
+
+      rightGroup.appendChild(exprPill);
+      rightGroup.appendChild(volPill);
+      rightGroup.appendChild(insertBtn);
+      rightGroup.appendChild(closeBtn);
+
+      toolbar.appendChild(leftGroup);
+      toolbar.appendChild(rightGroup);
+
+      const canvasWrap = document.createElement('div');
+      canvasWrap.className = 'fl-canvas-wrap';
+
+      this.drawer.appendChild(toolbar);
+      this.drawer.appendChild(canvasWrap);
+
+      this.synth = new PianoRollSynth({
+        volume: globalVolume,
+        expression: globalExpression
+      });
+
+      this.pianoRoll = new FLPianoRoll(canvasWrap, {
+        height: 260,
+        editable: true,
+        synth: this.synth,
+        onNotesChange: (notes) => {
+          if (this.lcdNotes) {
+            const count = (notes && notes.length) || 0;
+            this.lcdNotes.textContent = `${count} note${count === 1 ? '' : 's'}`;
+          }
+        }
+      });
+
+      this.synth.onProgress = (currentBeat, activePitches) => {
+        this.pianoRoll.updatePlayback(currentBeat, activePitches);
+      };
+
+      this.synth.onEnded = () => {
+        playBtn.innerHTML = '▶ Play';
+        playBtn.classList.remove('is-playing');
+        this.pianoRoll.seekTo(0);
+      };
+
+      this.pianoRoll.togglePlay = () => {
+        playBtn.click();
+      };
+
+      playBtn.onclick = async () => {
+        await this.synth.ensureResumed();
+        if (!this.synth.isPlaying) {
+          if (typeof registeredRolls !== 'undefined') {
+            for (const roll of registeredRolls) {
+              if (roll !== this.pianoRoll && roll.synth && roll.synth.isPlaying) {
+                roll.synth.stop(true);
+              }
+            }
+          }
+          const notes = (this.pianoRoll.musicData && this.pianoRoll.musicData.notes) || [];
+          if (notes.length === 0) return;
+          const tempo = this.pianoRoll.musicData.tempo || 120;
+          const totalBeats = this.pianoRoll.musicData.totalBeats || 16;
+          let startBeat = this.pianoRoll.currentBeat;
+          if (startBeat >= totalBeats - 0.05) startBeat = 0;
+
+          this.synth.play(notes, tempo, true, totalBeats, startBeat);
+          playBtn.innerHTML = '⏸ Pause';
+          playBtn.classList.add('is-playing');
+        } else if (this.synth.isPaused) {
+          this.synth.resume();
+          playBtn.innerHTML = '⏸ Pause';
+          playBtn.classList.add('is-playing');
+        } else {
+          this.synth.pause();
+          playBtn.innerHTML = '▶ Play';
+          playBtn.classList.remove('is-playing');
+        }
+      };
+
+      stopBtn.onclick = () => {
+        this.synth.stop(true);
+        this.pianoRoll.seekTo(0);
+      };
+
+      clearBtn.onclick = () => {
+        this.pianoRoll.clearNotes();
+        if (this.lcdNotes) this.lcdNotes.textContent = '0 notes';
+      };
+
+      exprPill.querySelector('.fl-expr-select').onchange = (e) => {
+        const val = e.target.value;
+        globalExpression = val;
+        try { localStorage.setItem('nlm_fl_expression', val); } catch (err) {}
+        this.synth.setExpression(val);
+      };
+
+      volPill.querySelector('.fl-vol-slider').oninput = (e) => {
+        const val = parseFloat(e.target.value);
+        globalVolume = val;
+        try { localStorage.setItem('nlm_fl_volume', val.toString()); } catch (err) {}
+        this.synth.setVolume(val);
+      };
+
+      insertBtn.onclick = () => {
+        const notes = (this.pianoRoll.musicData && this.pianoRoll.musicData.notes) || [];
+        const abc = notesToABC(notes, {
+          tempo: this.pianoRoll.musicData?.tempo || 120,
+          key: 'C',
+          meter: '4/4'
+        });
+        const markdown = '```abc\n' + abc.trim() + '\n```';
+        insertTextIntoNotebookLM(markdown);
+
+        insertBtn.innerHTML = '✔ Inserted!';
+        insertBtn.style.background = '#285e3a';
+        setTimeout(() => {
+          insertBtn.innerHTML = '➤ Insert to Prompt';
+          insertBtn.style.background = '';
+        }, 1500);
+      };
+    }
+
+    if (this.drawer.parentElement !== inputContainer.parentElement) {
+      inputContainer.parentElement.insertBefore(this.drawer, inputContainer);
+    }
+  }
+
+  toggle(forceState) {
+    this.isOpen = (forceState !== undefined) ? forceState : !this.isOpen;
+    if (this.drawer) {
+      this.drawer.style.display = this.isOpen ? 'block' : 'none';
+    }
+    if (this.toggleBtn) {
+      this.toggleBtn.classList.toggle('is-active', this.isOpen);
+    }
+    if (this.isOpen && this.pianoRoll) {
+      activeRollForKeyboard = this.pianoRoll;
+      requestAnimationFrame(() => {
+        this.pianoRoll.updateCanvasDimensions();
+        this.pianoRoll.clampScroll();
+        this.pianoRoll.render();
+      });
+    } else if (!this.isOpen && this.synth && this.synth.isPlaying) {
+      this.synth.stop(true);
+    }
+  }
+}
+
+/**
  * Loop-immune, single-timer debounced scanner for NotebookLM DOM
  */
 class NotebookLMWatcher {
@@ -495,34 +983,49 @@ class NotebookLMWatcher {
     this.isScanning = false;
   }
 
+  initComposer() {
+    try {
+      const container = findNotebookLMInputContainer();
+      if (container) {
+        if (!activeComposer) {
+          activeComposer = new NotebookLMComposer();
+        }
+        activeComposer.init(container);
+      }
+    } catch (e) {
+      console.warn('Composer init error:', e);
+    }
+  }
+
   start() {
     // Initial scan after page load
     this.scheduleScan(600);
+    this.initComposer();
 
-    // MutationObserver watches ONLY for newly added chat message elements
+    // MutationObserver watches for new chat messages and query box
     this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
 
       for (const m of mutations) {
         // If mutation occurred inside our own widgets, IGNORE
         if (m.target && m.target.nodeType === Node.ELEMENT_NODE) {
-          if (m.target.closest?.('.fl-widget-container, .fl-lazy-placeholder')) {
+          if (m.target.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) {
             continue;
           }
         }
 
-        // Check if any newly added node is a chat container
+        // Check if any newly added node is a chat container or query box
         for (const node of m.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            // Ignore our own added elements completely
             if (node.classList?.contains('fl-widget-container') ||
                 node.classList?.contains('fl-lazy-placeholder') ||
-                node.closest?.('.fl-widget-container, .fl-lazy-placeholder')) {
+                node.classList?.contains('fl-composer-drawer') ||
+                node.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) {
               continue;
             }
 
-            if (node.matches?.('chat-message, .to-user-container, model-response') ||
-                node.querySelector?.('chat-message, .to-user-container, model-response')) {
+            if (node.matches?.('chat-message, .to-user-container, model-response, query-box, .query-box, textarea') ||
+                node.querySelector?.('chat-message, .to-user-container, model-response, query-box, .query-box, textarea')) {
               shouldScan = true;
               break;
             }
@@ -537,7 +1040,6 @@ class NotebookLMWatcher {
       }
     });
 
-    // Observe document.body with childList ONLY (NEVER characterData!)
     this.observer.observe(document.body, { childList: true, subtree: true });
   }
 
@@ -554,6 +1056,8 @@ class NotebookLMWatcher {
     this.isScanning = true;
 
     try {
+      this.initComposer();
+
       const messageNodes = Array.from(document.querySelectorAll('chat-message, .to-user-container, model-response'));
       if (messageNodes.length === 0) return;
 
@@ -597,9 +1101,14 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     extractAllABC,
     extractABC,
+    notesToABC,
+    midiToABCPitch,
+    formatABCDuration,
+    NotebookLMComposer,
     createPianoRollWidget,
     createLazyPlaceholder,
     processNotebookLMMessage,
     NotebookLMWatcher
   };
 }
+

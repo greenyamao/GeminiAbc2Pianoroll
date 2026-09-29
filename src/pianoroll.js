@@ -82,13 +82,20 @@ class FLPianoRoll {
       scrollbarHeight: 8,
       verticalScrollbarWidth: 8,
       autoScroll: false,
+      editable: false,
       onNoteClick: null,
       onKeyClick: null,
-      onSeek: null
+      onSeek: null,
+      onNotesChange: null
     }, options);
 
     this.musicData = null;
     this.synth = options.synth || null;
+    this.editable = !!this.options.editable;
+    this.lastNoteDuration = 1.0; // FL Studio sticky note length
+    this.isResizingNote = false;
+    this.resizingNote = null;
+    this.onNotesChange = this.options.onNotesChange || null;
     
     // Viewport state
     this.scrollX = 0;
@@ -161,6 +168,10 @@ class FLPianoRoll {
 
     this.initDOM();
     this.bindEvents();
+
+    if (this.editable && !this.musicData) {
+      this.initEmptyScore();
+    }
   }
 
   initDOM() {
@@ -226,6 +237,10 @@ class FLPianoRoll {
   setData(musicData) {
     this.musicData = musicData;
     if (!musicData || !musicData.notes || musicData.notes.length === 0) {
+      if (this.editable) {
+        this.initEmptyScore();
+        return;
+      }
       this.renderEmpty();
       return;
     }
@@ -262,6 +277,60 @@ class FLPianoRoll {
     this.activePitches.clear();
 
     this.render();
+  }
+
+  initEmptyScore() {
+    this.musicData = {
+      title: 'Composition',
+      key: 'C',
+      meter: '4/4',
+      tempo: 120,
+      beatsPerMeasure: 4,
+      totalBeats: 16,
+      minPitch: 48,
+      maxPitch: 72,
+      notes: []
+    };
+    this.minPitch = 48; // C3
+    this.maxPitch = 72; // C5
+    this.pitchRange = 25;
+    this.currentBeat = 0;
+    this.activePitches.clear();
+    this.scrollX = 0;
+    this.clampScroll();
+    this.render();
+  }
+
+  clearNotes() {
+    if (!this.musicData) {
+      this.initEmptyScore();
+      return;
+    }
+    this.musicData.notes = [];
+    this.musicData.totalBeats = 16;
+    this.currentBeat = 0;
+    this.activePitches.clear();
+    if (this.synth) this.synth.stop(true);
+    this.render();
+    if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+  }
+
+  midiToNoteName(pitch) {
+    const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const octave = Math.floor(pitch / 12) - 1;
+    return NOTE_NAMES[((pitch % 12) + 12) % 12] + octave;
+  }
+
+  isNearNoteRightEdge(note, x, y) {
+    const nx = this.xAtBeat(note.startBeat);
+    const nw = Math.max(8, (note.duration * this.zoomX) - 1.5);
+    const ny = this.yAtPitch(note.pitch);
+    const nh = this.rowHeight;
+    if (y >= ny && y <= ny + nh) {
+      const rightEdge = nx + nw;
+      return (x >= rightEdge - 8 && x <= rightEdge + 5);
+    }
+    return false;
   }
 
   fitToWidth() {
@@ -352,8 +421,28 @@ class FLPianoRoll {
   bindEvents() {
     // MOUSE DOWN
     this.canvas.addEventListener('mousedown', (e) => {
-      // 0. Intercept Middle Click (Wheel Click) or Right Click -> Hand Pan/Drag Grid (FL Studio style)!
-      // Calling preventDefault() immediately stops browser from entering page autoscroll mode!
+      const pos = this.getCanvasMousePos(e);
+      const x = pos.x;
+      const y = pos.y;
+
+      // 0a. Right Click on existing note in editable mode -> Delete Note (FL Studio behavior)
+      if (e.button === 2 && this.editable && this.musicData && this.musicData.notes) {
+        const noteToDelete = this.findNoteAt(x, y);
+        if (noteToDelete) {
+          e.preventDefault();
+          e.stopPropagation();
+          const idx = this.musicData.notes.indexOf(noteToDelete);
+          if (idx !== -1) {
+            this.musicData.notes.splice(idx, 1);
+            if (this.hoveredNote === noteToDelete) this.hoveredNote = null;
+            this.render();
+            if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+          }
+          return;
+        }
+      }
+
+      // 0b. Intercept Middle Click or Right Click on empty space -> Hand Pan/Drag Grid
       if (e.button === 1 || e.button === 2) {
         e.preventDefault();
         e.stopPropagation();
@@ -365,10 +454,6 @@ class FLPianoRoll {
         this.canvas.style.cursor = 'grabbing';
         return;
       }
-
-      const pos = this.getCanvasMousePos(e);
-      const x = pos.x;
-      const y = pos.y;
 
       const kw = this.options.keyboardWidth;
       const rh = this.options.rulerHeight;
@@ -444,15 +529,63 @@ class FLPianoRoll {
         return;
       }
 
-      // 4. Click on a Note in the grid -> Play note preview
+      // 4. Click on a Note in the grid
       const clickedNote = this.findNoteAt(x, y);
       if (clickedNote) {
+        if (this.editable) {
+          // Check right edge resize handle
+          if (this.isNearNoteRightEdge(clickedNote, x, y)) {
+            this.isResizingNote = true;
+            this.resizingNote = clickedNote;
+            this.lastNoteDuration = clickedNote.duration; // Remember duration
+            this.canvas.style.cursor = 'ew-resize';
+            return;
+          }
+
+          // Clicked note body: remember duration and play preview
+          this.lastNoteDuration = clickedNote.duration; // Remember duration
+          if (this.synth) this.synth.playNotePreview(clickedNote.pitch);
+          if (this.options.onNoteClick) this.options.onNoteClick(clickedNote);
+          return;
+        }
+
         if (this.options.onNoteClick) this.options.onNoteClick(clickedNote);
         else if (this.synth) this.synth.playNotePreview(clickedNote.pitch);
         return;
       }
 
-      // 5. Left Click on empty grid area -> Seek playhead directly to clicked beat!
+      // 5. Left Click on empty grid area
+      if (this.editable && x > kw && x < this.width - vsw && y > rh && y < sbY) {
+        // Draw note immediately in FL Studio style!
+        const pitch = this.pitchAtY(y);
+        const beat = this.beatAtX(x, true);
+        if (pitch !== null && beat >= 0) {
+          if (!this.musicData) {
+            this.initEmptyScore();
+          }
+          const duration = this.lastNoteDuration || 1.0;
+          const newNote = {
+            pitch: pitch,
+            name: this.midiToNoteName(pitch),
+            startBeat: beat,
+            duration: duration,
+            velocity: 80
+          };
+          this.musicData.notes.push(newNote);
+          // Keep vertical range visible
+          this.minPitch = Math.min(this.minPitch, Math.max(21, pitch - 2));
+          this.maxPitch = Math.max(this.maxPitch, Math.min(108, pitch + 2));
+          this.pitchRange = this.maxPitch - this.minPitch + 1;
+          this.musicData.totalBeats = Math.max(16, Math.max(this.musicData.totalBeats, beat + duration + 4));
+
+          if (this.synth) this.synth.playNotePreview(pitch);
+          this.render();
+          if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+          return;
+        }
+      }
+
+      // If not editable or clicked elsewhere, seek playhead directly to clicked beat
       this.isScrubbing = true;
       this.hoveredRulerX = null;
       this.wasPlayingBeforeScrub = this.synth ? (this.synth.isPlaying && !this.synth.isPaused) : false;
@@ -564,12 +697,35 @@ class FLPianoRoll {
         }
       }
 
-      // Hover note detection
+      // Active note resizing (FL Studio right-edge drag)
+      if (this.isResizingNote && this.resizingNote) {
+        const beat = this.beatAtX(x, true);
+        let newDuration = Math.max(0.25, beat - this.resizingNote.startBeat);
+        newDuration = Math.round(newDuration * 4) / 4; // snap to 0.25 beat
+        this.resizingNote.duration = newDuration;
+        this.lastNoteDuration = newDuration; // Remember duration
+        if (this.musicData) {
+          this.musicData.totalBeats = Math.max(16, Math.max(this.musicData.totalBeats, this.resizingNote.startBeat + newDuration + 4));
+        }
+        this.canvas.style.cursor = 'ew-resize';
+        this.render();
+        if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+        return;
+      }
+
+      // Hover note detection and cursor
       if (x > kw && x < this.width - vsw && y > rh && y < sbY) {
         const note = this.findNoteAt(x, y);
         if (note !== this.hoveredNote) {
           this.hoveredNote = note;
           this.render();
+        }
+        if (this.editable && note) {
+          if (this.isNearNoteRightEdge(note, x, y)) {
+            this.canvas.style.cursor = 'ew-resize';
+          } else {
+            this.canvas.style.cursor = 'pointer';
+          }
         }
       } else if (this.hoveredNote) {
         this.hoveredNote = null;
@@ -579,6 +735,13 @@ class FLPianoRoll {
 
     // MOUSE UP
     window.addEventListener('mouseup', () => {
+      if (this.isResizingNote) {
+        this.isResizingNote = false;
+        this.resizingNote = null;
+        this.canvas.style.cursor = 'default';
+        this.render();
+        if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+      }
       // End scrubbing
       if (this.isScrubbing) {
         this.isScrubbing = false;
@@ -886,12 +1049,19 @@ class FLPianoRoll {
       this.roundRect(this.ctx, x, y, w, h, 2.5, false, true);
 
       // Pitch label inside the note (e.g. "F#6", "D#6", "C2", "G3")
+      const noteLabel = n.name || this.midiToNoteName(n.pitch);
       if (w > 16 && h >= 10) {
         this.ctx.fillStyle = this.colors.noteText;
         this.ctx.font = 'bold 9.5px system-ui, sans-serif';
         this.ctx.textAlign = 'left';
         this.ctx.textBaseline = 'middle';
-        this.ctx.fillText(n.name, x + 4, y + (h / 2));
+        this.ctx.fillText(noteLabel, x + 4, y + (h / 2));
+      }
+
+      // If editable, draw a subtle handle on the right edge of each note
+      if (this.editable && w > 10) {
+        this.ctx.fillStyle = isHovered ? 'rgba(0, 0, 0, 0.45)' : 'rgba(0, 0, 0, 0.22)';
+        this.ctx.fillRect(x + w - 4, y, 3, h);
       }
     }
   }
