@@ -39,6 +39,37 @@ function getLazyObserver() {
 }
 
 /**
+ * Checks whether an AI streaming generation is currently active in the page
+ */
+function isNotebookLMStreaming() {
+  if (typeof document === 'undefined') return false;
+  const stopBtn = document.querySelector(
+    'button[aria-label*="Stop" i], ' +
+    'button[aria-label*="Остановить" i], ' +
+    'button[aria-label*="Cancel" i], ' +
+    'button[title*="Stop" i], ' +
+    'button[title*="Остановить" i], ' +
+    '.stop-button, ' +
+    '[data-streaming="true"], ' +
+    '.streaming, ' +
+    '.cursor-blink'
+  );
+  return !!stopBtn;
+}
+
+/**
+ * Checks whether text contains an unclosed markdown code fence (``` or ~~~)
+ */
+function hasUnclosedFence(text) {
+  if (!text) return false;
+  const backtickMatches = text.match(/```/g);
+  if (backtickMatches && backtickMatches.length % 2 !== 0) return true;
+  const tildeMatches = text.match(/~~~/g);
+  if (tildeMatches && tildeMatches.length % 2 !== 0) return true;
+  return false;
+}
+
+/**
  * Validates that body contains musical elements (notes and barlines)
  */
 function hasMusicContent(text) {
@@ -139,9 +170,12 @@ function extractAllABC(text) {
   }
 
   if (currentBlock.length > 0 && hasMusicContent(currentBlock.join('\n'))) {
-    let abc = currentBlock.join('\n').trim();
-    if (!abc.startsWith('X:')) abc = 'X:1\n' + abc;
-    results.push({ abcString: abc });
+    // Only accept trailing unclosed block if streaming is complete or was not a code fence
+    if (!inFence || !isNotebookLMStreaming()) {
+      let abc = currentBlock.join('\n').trim();
+      if (!abc.startsWith('X:')) abc = 'X:1\n' + abc;
+      results.push({ abcString: abc });
+    }
   }
 
   return results;
@@ -486,28 +520,51 @@ function createPianoRollWidget(abcString, originalHostElement) {
 
   widget.synth = synth;
   widget.pianoRoll = pianoRoll;
+
+  // Live dynamic update method for streaming tokens
+  widget.updateData = (newAbc) => {
+    try {
+      const parsed = ABCParser.parse(newAbc);
+      if (parsed && parsed.notes && parsed.notes.length > 0) {
+        musicData = parsed;
+        pianoRoll.setData(parsed);
+        if (lcd) {
+          lcd.title = `Key: ${parsed.key} | Meter: ${parsed.meter} | Tempo: ${parsed.tempo} BPM`;
+          const keyEl = lcd.querySelector('.fl-lcd-key');
+          if (keyEl) keyEl.textContent = parsed.key;
+          const meterEl = lcd.querySelector('.fl-lcd-meter');
+          if (meterEl) meterEl.textContent = parsed.meter;
+          const bpmEl = lcd.querySelector('.fl-lcd-bpm');
+          if (bpmEl) bpmEl.innerHTML = `${parsed.tempo}<small>BPM</small>`;
+        }
+      }
+    } catch (err) {
+      console.warn('Live ABC update error:', err);
+    }
+  };
+
   return widget;
 }
 
 /**
- * Inspects a NotebookLM chat message and replaces ABC blocks in-place with Piano Roll widgets
+ * Inspects a NotebookLM chat message and replaces ABC blocks in-place with Piano Roll widgets.
+ * Fully supports live streaming updates so widgets continuously sync with streamed tokens.
  * @param {HTMLElement} messageNode
  * @param {boolean} immediate - If true, mounts full widget immediately; if false, mounts lazy placeholder
  */
 function processNotebookLMMessage(messageNode, immediate = true) {
   if (!messageNode) return;
 
-  // Circuit breaker: never process an already handled message
+  const fullText = messageNode.textContent || '';
+  const isStreaming = isNotebookLMStreaming();
+  const unclosed = hasUnclosedFence(fullText);
+
+  // Circuit breaker: only skip if message has already been finalized and is not streaming
   if (messageNode.dataset.flProcessed === 'true') return;
-  if (messageNode.querySelector('.fl-widget-container, .fl-lazy-placeholder')) {
-    messageNode.dataset.flProcessed = 'true';
-    return;
-  }
 
   // 1. First: inspect all code blocks (<pre> elements)
   const preElements = Array.from(messageNode.querySelectorAll('pre'));
   for (const pre of preElements) {
-    if (pre.dataset.flAttached === 'true') continue;
     if (pre.closest('.fl-widget-container, .fl-lazy-placeholder')) continue;
 
     const preText = pre.textContent || '';
@@ -515,6 +572,18 @@ function processNotebookLMMessage(messageNode, immediate = true) {
       const abcMatch = extractABC(preText);
       if (abcMatch) {
         const container = pre.closest('.code-block, .snippet-container, pre') || pre;
+
+        // If widget already attached to this container, update its notes in real-time as tokens stream
+        if (container._flWidget && typeof container._flWidget.updateData === 'function') {
+          if (container.dataset.flLastAbc !== abcMatch.abcString) {
+            container._flWidget.updateData(abcMatch.abcString);
+            container.dataset.flLastAbc = abcMatch.abcString;
+          }
+          continue;
+        }
+
+        if (pre.dataset.flAttached === 'true') continue;
+
         const elem = immediate
           ? createPianoRollWidget(abcMatch.abcString, container)
           : createLazyPlaceholder(abcMatch.abcString, container);
@@ -522,6 +591,8 @@ function processNotebookLMMessage(messageNode, immediate = true) {
         if (elem) {
           pre.dataset.flAttached = 'true';
           container.dataset.flAttached = 'true';
+          container._flWidget = elem;
+          container.dataset.flLastAbc = abcMatch.abcString;
           container.style.display = 'none'; // Hide the ABC code block cleanly
           // Insert the Piano Roll widget in-place directly where the ABC code was!
           container.parentElement.insertBefore(elem, container);
@@ -531,7 +602,6 @@ function processNotebookLMMessage(messageNode, immediate = true) {
   }
 
   // 2. Second: inspect all text blocks across the message
-  const fullText = messageNode.textContent || '';
   if (hasMusicContent(fullText)) {
     const allFound = extractAllABC(fullText);
     for (const item of allFound) {
@@ -573,11 +643,22 @@ function processNotebookLMMessage(messageNode, immediate = true) {
 
       const hostContainer = targetEl.closest('.paragraph, [class*="paragraph"], p, pre, .code-block, paragraph-element-view') || targetEl;
 
+      // If widget already attached, update its notes in real-time
+      if (hostContainer._flWidget && typeof hostContainer._flWidget.updateData === 'function') {
+        if (hostContainer.dataset.flLastAbc !== item.abcString) {
+          hostContainer._flWidget.updateData(item.abcString);
+          hostContainer.dataset.flLastAbc = item.abcString;
+        }
+        continue;
+      }
+
       const elem = immediate
         ? createPianoRollWidget(item.abcString, hostContainer)
         : createLazyPlaceholder(item.abcString, hostContainer);
 
       if (elem) {
+        hostContainer._flWidget = elem;
+        hostContainer.dataset.flLastAbc = item.abcString;
         if (hostContainer !== messageNode && hostContainer.parentElement) {
           hostContainer.style.display = 'none';
           hostContainer.parentElement.insertBefore(elem, hostContainer);
@@ -589,9 +670,11 @@ function processNotebookLMMessage(messageNode, immediate = true) {
     }
   }
 
-  // Mark this message node as completely processed only if we successfully attached or confirmed no music
-  if (messageNode.querySelector('.fl-widget-container, .fl-lazy-placeholder') || !hasMusicContent(messageNode.textContent || '')) {
-    messageNode.dataset.flProcessed = 'true';
+  // Mark this message node as completely processed ONLY when streaming has finished and no unclosed fences remain
+  if (!isStreaming && !unclosed) {
+    if (messageNode.querySelector('.fl-widget-container, .fl-lazy-placeholder') || !hasMusicContent(fullText)) {
+      messageNode.dataset.flProcessed = 'true';
+    }
   }
 }
 
@@ -637,32 +720,43 @@ function quantize(val, step = 0.25) {
   return Math.round(Math.round(val / step) * step * 10000) / 10000;
 }
 
+function formatABCDuration(durationInBeats) {
+  const qBeats = quantize(durationInBeats, 0.25);
+  const unitsTimes2 = Math.round(qBeats * 4); // each 0.25 beat = 0.5 unit in L:1/8
+  if (unitsTimes2 === 2) return '';           // 0.5 beats = 1 unit
+  if (unitsTimes2 === 1) return '/2';         // 0.25 beats = 0.5 unit
+  if (unitsTimes2 % 2 === 0) {
+    return (unitsTimes2 / 2).toString();      // Integer units e.g. 2, 3, 4, 6, 8
+  }
+  return `${unitsTimes2}/2`;                  // Fractional units e.g. 3/2, 5/2, 7/2
+}
+
 function formatABCRest(restInBeats) {
-  let remUnits = Math.round(quantize(restInBeats, 0.25) * 4) / 2; // In 1/8 units
+  let qBeats = quantize(restInBeats, 0.25);
   let out = '';
 
-  while (remUnits >= 0.25) {
-    if (remUnits >= 8) {
+  while (qBeats >= 0.24) {
+    if (qBeats >= 4.0) {
       out += 'z8 ';
-      remUnits -= 8;
-    } else if (remUnits >= 6) {
+      qBeats -= 4.0;
+    } else if (qBeats >= 3.0) {
       out += 'z6 ';
-      remUnits -= 6;
-    } else if (remUnits >= 4) {
+      qBeats -= 3.0;
+    } else if (qBeats >= 2.0) {
       out += 'z4 ';
-      remUnits -= 4;
-    } else if (remUnits >= 3) {
+      qBeats -= 2.0;
+    } else if (qBeats >= 1.5) {
       out += 'z3 ';
-      remUnits -= 3;
-    } else if (remUnits >= 2) {
+      qBeats -= 1.5;
+    } else if (qBeats >= 1.0) {
       out += 'z2 ';
-      remUnits -= 2;
-    } else if (remUnits >= 1) {
+      qBeats -= 1.0;
+    } else if (qBeats >= 0.5) {
       out += 'z ';
-      remUnits -= 1;
-    } else if (remUnits >= 0.5) {
+      qBeats -= 0.5;
+    } else if (qBeats >= 0.25) {
       out += 'z/2 ';
-      remUnits -= 0.5;
+      qBeats -= 0.25;
     } else {
       break;
     }
@@ -670,56 +764,87 @@ function formatABCRest(restInBeats) {
   return out;
 }
 
-function formatABCDuration(durationInBeats) {
-  const units = Math.round(quantize(durationInBeats, 0.25) * 4) / 2; // L:1/8 -> 0.5 beat = 1 unit
-  if (units === 1) return '';
-  if (units === 0.5) return '/2';
-  if (units === 0.25) return '/4';
-  if (Number.isInteger(units) && units > 0) return units.toString();
-  return Math.max(1, Math.round(units)).toString();
-}
-
-function notesToABC(notes, options = {}) {
-  const key = options.key || 'C';
-  const meter = options.meter || '4/4';
-  const tempo = options.tempo || 120;
-  const beatsPerMeasure = 4;
-
-  const header = `X:1\nT:Melody\nM:${meter}\nL:1/8\nQ:1/4=${tempo}\nK:${key}\n`;
-  if (!notes || notes.length === 0) {
-    return header + '| z8 | z8 |\n';
+/**
+ * Formats a single voice's notes as an ABC music body string.
+ * Strictly adheres to ABC 2.1 standard:
+ * 1. Notes crossing measure barlines are cleanly split and tied across the barline (- |).
+ * 2. Chords are formatted cleanly without internal spaces: [CEGBd].
+ * 3. Every measure is mathematically padded with exact rests to match beatsPerMeasure.
+ */
+function formatSingleVoiceABC(notes, totalBeats, beatsPerMeasure) {
+  // Step 1: Slice notes that cross barline boundaries and add ties
+  const slicedNotes = [];
+  for (const n of notes) {
+    let curBeat = Math.max(0, quantize(n.startBeat, 0.25));
+    let remDur = Math.max(0.25, quantize(n.duration, 0.25));
+    while (remDur > 0.01) {
+      const nextBar = (Math.floor(curBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
+      const chunkDur = quantize(Math.min(remDur, nextBar - curBeat), 0.25);
+      const isTied = remDur > chunkDur + 0.01;
+      slicedNotes.push({
+        pitch: n.pitch,
+        startBeat: curBeat,
+        duration: chunkDur,
+        hasTie: isTied
+      });
+      curBeat = quantize(curBeat + chunkDur, 0.25);
+      remDur = quantize(remDur - chunkDur, 0.25);
+    }
   }
 
-  // Strictly quantize all note timings to clean musical fractions
-  const cleanNotes = notes.map(n => ({
-    pitch: n.pitch,
-    startBeat: Math.max(0, quantize(n.startBeat, 0.25)),
-    duration: Math.max(0.25, quantize(n.duration, 0.25))
-  })).sort((a, b) => a.startBeat - b.startBeat || b.pitch - a.pitch);
-
-  // Partition notes into non-overlapping voice layers
-  // Notes at the same startBeat with same duration form chords within one voice
-  // Notes at the same startBeat with different durations go to separate voices
-  const voices = partitionNotesIntoVoices(cleanNotes);
-
-  // Find total length (pad to full measures)
-  let maxBeat = 0;
-  for (const n of cleanNotes) {
-    maxBeat = Math.max(maxBeat, n.startBeat + n.duration);
+  // Step 2: Group notes by startBeat into chord groups
+  const groups = [];
+  for (const n of slicedNotes) {
+    let g = groups.find(x => Math.abs(x.startBeat - n.startBeat) < 0.05);
+    if (!g) {
+      g = { startBeat: n.startBeat, duration: n.duration, pitches: [], hasTie: n.hasTie };
+      groups.push(g);
+    }
+    if (!g.pitches.includes(n.pitch)) {
+      g.pitches.push(n.pitch);
+    }
+    if (n.hasTie) g.hasTie = true;
   }
-  const paddedTotal = Math.max(beatsPerMeasure, Math.ceil(maxBeat / beatsPerMeasure) * beatsPerMeasure);
+  groups.sort((a, b) => a.startBeat - b.startBeat || b.pitches[0] - a.pitches[0]);
 
-  if (voices.length === 1) {
-    // Single voice: no V: directives needed
-    return header + formatSingleVoiceABC(voices[0], paddedTotal, beatsPerMeasure) + '\n';
+  // Step 3: Emit measure by measure with exact barlines and rests
+  const numMeasures = Math.max(1, Math.ceil(totalBeats / beatsPerMeasure));
+  let body = '| ';
+
+  for (let m = 0; m < numMeasures; m++) {
+    const measureStart = m * beatsPerMeasure;
+    const measureEnd = (m + 1) * beatsPerMeasure;
+    let curBeat = measureStart;
+
+    const measureGroups = groups.filter(g => g.startBeat >= measureStart - 0.01 && g.startBeat < measureEnd - 0.01);
+
+    for (const g of measureGroups) {
+      if (g.startBeat > curBeat + 0.01) {
+        const restDur = quantize(g.startBeat - curBeat, 0.25);
+        body += formatABCRest(restDur);
+        curBeat = g.startBeat;
+      }
+
+      const tieSuffix = g.hasTie ? '-' : '';
+      if (g.pitches.length === 1) {
+        body += midiToABCPitch(g.pitches[0]) + formatABCDuration(g.duration) + tieSuffix + ' ';
+      } else {
+        const notesStr = g.pitches.map(midiToABCPitch).join('');
+        body += `[${notesStr}]${formatABCDuration(g.duration)}${tieSuffix} `;
+      }
+      curBeat = quantize(curBeat + g.duration, 0.25);
+    }
+
+    if (curBeat < measureEnd - 0.01) {
+      const restDur = quantize(measureEnd - curBeat, 0.25);
+      body += formatABCRest(restDur);
+      curBeat = measureEnd;
+    }
+
+    body += (m === numMeasures - 1) ? '||' : '| ';
   }
 
-  // Multiple voices: use V: directives
-  let body = '';
-  voices.forEach((v, idx) => {
-    body += `V:${idx + 1}\n` + formatSingleVoiceABC(v, paddedTotal, beatsPerMeasure) + '\n';
-  });
-  return header + body;
+  return body.trim();
 }
 
 /**
@@ -763,71 +888,57 @@ function partitionNotesIntoVoices(notes) {
   return voices;
 }
 
-/**
- * Formats a single voice's notes as an ABC music body string.
- * Handles chords, rests, and measure barlines.
- */
-function formatSingleVoiceABC(notes, totalBeats, beatsPerMeasure) {
-  // Group notes by startBeat into chord groups
-  const groups = [];
-  for (const n of notes) {
-    let g = groups.find(x => Math.abs(x.startBeat - n.startBeat) < 0.05);
-    if (!g) {
-      g = { startBeat: n.startBeat, duration: n.duration, pitches: [] };
-      groups.push(g);
-    }
-    g.pitches.push(n.pitch);
-  }
-  groups.sort((a, b) => a.startBeat - b.startBeat);
-
-  let body = '| ';
-  let currentBeat = 0;
-
-  for (let i = 0; i < groups.length; i++) {
-    const g = groups[i];
-
-    // Fill rests before this group, respecting barlines
-    while (g.startBeat > currentBeat + 0.05) {
-      const nextBarBeat = (Math.floor(currentBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
-      const restBeats = Math.min(g.startBeat - currentBeat, nextBarBeat - currentBeat);
-      const cleanRest = quantize(restBeats, 0.25);
-      if (cleanRest > 0) body += formatABCRest(cleanRest);
-      currentBeat = quantize(currentBeat + cleanRest, 0.25);
-      if (Math.abs(currentBeat - nextBarBeat) < 0.05 && g.startBeat > currentBeat + 0.05) {
-        body += '| ';
+function notesToABC(notes, options = {}) {
+  const key = options.key || 'C';
+  const meter = options.meter || '4/4';
+  const tempo = options.tempo || 120;
+  let beatsPerMeasure = 4;
+  if (meter) {
+    const parts = meter.split('/');
+    if (parts.length === 2) {
+      const num = parseInt(parts[0], 10);
+      const den = parseInt(parts[1], 10);
+      if (num && den) {
+        beatsPerMeasure = (num / den) * 4;
       }
     }
-
-    // Format note or chord
-    if (g.pitches.length === 1) {
-      body += midiToABCPitch(g.pitches[0]) + formatABCDuration(g.duration) + ' ';
-    } else {
-      const notesStr = g.pitches.map(midiToABCPitch).join(' ');
-      body += `[${notesStr}]${formatABCDuration(g.duration)} `;
-    }
-    currentBeat = quantize(currentBeat + g.duration, 0.25);
-
-    // Barline check
-    const measureRem = currentBeat % beatsPerMeasure;
-    if (Math.abs(measureRem) < 0.05 && (i < groups.length - 1 || currentBeat < totalBeats - 0.05)) {
-      body += '| ';
-    }
   }
 
-  // Pad remaining beats with rests to fill measures
-  while (totalBeats > currentBeat + 0.05) {
-    const nextBarBeat = (Math.floor(currentBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
-    const restBeats = Math.min(totalBeats - currentBeat, nextBarBeat - currentBeat);
-    const cleanRest = quantize(restBeats, 0.25);
-    if (cleanRest > 0) body += formatABCRest(cleanRest);
-    currentBeat = quantize(currentBeat + cleanRest, 0.25);
-    if (Math.abs(currentBeat - nextBarBeat) < 0.05 && currentBeat < totalBeats - 0.05) {
-      body += '| ';
-    }
+  const header = `X:1\nT:Melody\nM:${meter}\nL:1/8\nQ:1/4=${tempo}\nK:${key}\n`;
+  if (!notes || notes.length === 0) {
+    return header + '| z8 | z8 ||\n';
   }
 
-  if (!body.trim().endsWith('|')) body += '||';
-  return body.trim();
+  // Strictly quantize all note timings to clean musical fractions
+  const cleanNotes = notes.map(n => ({
+    pitch: n.pitch,
+    startBeat: Math.max(0, quantize(n.startBeat, 0.25)),
+    duration: Math.max(0.25, quantize(n.duration, 0.25))
+  })).sort((a, b) => a.startBeat - b.startBeat || b.pitch - a.pitch);
+
+  // Partition notes into non-overlapping voice layers
+  // Notes at the same startBeat with same duration form chords within one voice
+  // Notes at the same startBeat with different durations go to separate voices
+  const voices = partitionNotesIntoVoices(cleanNotes);
+
+  // Find total length (pad to full measures)
+  let maxBeat = 0;
+  for (const n of cleanNotes) {
+    maxBeat = Math.max(maxBeat, n.startBeat + n.duration);
+  }
+  const paddedTotal = Math.max(beatsPerMeasure, Math.ceil(maxBeat / beatsPerMeasure) * beatsPerMeasure);
+
+  if (voices.length === 1) {
+    // Single voice: no V: directives needed
+    return header + formatSingleVoiceABC(voices[0], paddedTotal, beatsPerMeasure) + '\n';
+  }
+
+  // Multiple voices: use V: directives
+  let body = '';
+  voices.forEach((v, idx) => {
+    body += `V:${idx + 1}\n` + formatSingleVoiceABC(v, paddedTotal, beatsPerMeasure) + '\n';
+  });
+  return header + body;
 }
 
 /**
@@ -1389,7 +1500,7 @@ class NotebookLMWatcher {
       }, 1500);
     }
 
-    // MutationObserver watches for any newly added nodes in document
+    // MutationObserver watches for any newly added nodes or text changes in document
     this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
 
@@ -1399,6 +1510,11 @@ class NotebookLMWatcher {
           if (m.target.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) {
             continue;
           }
+        }
+
+        if (m.type === 'characterData') {
+          shouldScan = true;
+          break;
         }
 
         for (const node of m.addedNodes) {
@@ -1420,14 +1536,14 @@ class NotebookLMWatcher {
       }
 
       if (shouldScan) {
-        this.scheduleScan(350);
+        this.scheduleScan(250);
       }
     });
 
-    this.observer.observe(document.body, { childList: true, subtree: true });
+    this.observer.observe(document.body, { childList: true, subtree: true, characterData: true });
   }
 
-  scheduleScan(delay = 350) {
+  scheduleScan(delay = 250) {
     if (this.scanTimer) clearTimeout(this.scanTimer);
     this.scanTimer = setTimeout(() => {
       this.scanTimer = null;
@@ -1476,7 +1592,8 @@ class NotebookLMWatcher {
       const candidateMessages = [];
       for (const msg of messageNodes) {
         if (msg.dataset.flProcessed === 'true') continue;
-        if (msg.querySelector('.fl-widget-container, .fl-lazy-placeholder')) {
+        const isMsgStreaming = isNotebookLMStreaming() || hasUnclosedFence(msg.textContent || '');
+        if (!isMsgStreaming && msg.querySelector('.fl-widget-container, .fl-lazy-placeholder')) {
           msg.dataset.flProcessed = 'true';
           continue;
         }
@@ -1513,6 +1630,8 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     extractAllABC,
     extractABC,
+    isNotebookLMStreaming,
+    hasUnclosedFence,
     notesToABC,
     partitionNotesIntoVoices,
     formatSingleVoiceABC,

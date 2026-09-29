@@ -382,7 +382,8 @@ function parseABC(abcString) {
         tupletNotesRemaining: 0,
         tupletScale: 1,
         brokenRhythmScale: 1,
-        lastNote: null
+        lastNote: null,
+        openTies: {}
       };
     }
     return voices[cleanId];
@@ -524,10 +525,14 @@ function parseABC(abcString) {
 
       let maxChordDuration = 0;
       for (const cn of chordNotes) {
-        // Handle ties
-        if (v.lastNote && v.lastNote.hasTie && v.lastNote.pitch === cn.pitch && v.lastNote.voice === v.id) {
-          v.lastNote.duration += cn.duration;
-          v.lastNote.hasTie = cn.hasTie;
+        // Handle ties (including chords with multiple simultaneous ties)
+        if (v.openTies && v.openTies[cn.pitch]) {
+          v.openTies[cn.pitch].duration += cn.duration;
+          if (cn.hasTie) {
+            v.openTies[cn.pitch].hasTie = true;
+          } else {
+            delete v.openTies[cn.pitch];
+          }
         } else {
           const newNote = {
             pitch: cn.pitch,
@@ -540,6 +545,10 @@ function parseABC(abcString) {
           };
           notes.push(newNote);
           v.lastNote = newNote;
+          if (cn.hasTie) {
+            if (!v.openTies) v.openTies = {};
+            v.openTies[cn.pitch] = newNote;
+          }
         }
         if (cn.duration > maxChordDuration) {
           maxChordDuration = cn.duration;
@@ -628,9 +637,13 @@ function parseABC(abcString) {
       }
 
       // Check for ties: merge identical consecutive notes
-      if (v.lastNote && v.lastNote.hasTie && v.lastNote.pitch === parsed.note.pitch && v.lastNote.voice === v.id) {
-        v.lastNote.duration += finalDuration;
-        v.lastNote.hasTie = parsed.note.hasTie;
+      if (v.openTies && v.openTies[parsed.note.pitch]) {
+        v.openTies[parsed.note.pitch].duration += finalDuration;
+        if (parsed.note.hasTie) {
+          v.openTies[parsed.note.pitch].hasTie = true;
+        } else {
+          delete v.openTies[parsed.note.pitch];
+        }
       } else {
         const newNote = {
           pitch: parsed.note.pitch,
@@ -643,6 +656,10 @@ function parseABC(abcString) {
         };
         notes.push(newNote);
         v.lastNote = newNote;
+        if (parsed.note.hasTie) {
+          if (!v.openTies) v.openTies = {};
+          v.openTies[parsed.note.pitch] = newNote;
+        }
       }
 
       v.currentBeat += finalDuration;
