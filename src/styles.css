@@ -153,17 +153,6 @@
   color: #ffffff;
 }
 
-.fl-btn-raw {
-  color: #94a3b8;
-  padding: 3px 7px;
-}
-
-.fl-btn-active-toggle {
-  background: #28394a;
-  border-color: #436280;
-  color: #64b5f6;
-}
-
 /* Compact Tool Pills (Expression & Volume) */
 .fl-tool-pill {
   display: inline-flex;
@@ -235,52 +224,6 @@
   width: 100%;
   background: #182026;
   overflow: hidden;
-}
-
-/* Raw ABC collapsible container */
-.fl-raw-drawer {
-  display: none;
-  background: #0f1418;
-  border-top: 1px solid var(--fl-border);
-  padding: 10px 12px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
-  color: #94a3b8;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 180px;
-  overflow-y: auto;
-}
-
-.fl-raw-drawer.is-open {
-  display: block;
-}
-
-.fl-raw-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 6px;
-  color: #64748b;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.fl-copy-btn {
-  background: transparent;
-  border: 1px solid #334155;
-  color: #94a3b8;
-  padding: 2px 6px;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 10px;
-}
-
-.fl-copy-btn:hover {
-  background: #1e293b;
-  color: #e2e8f0;
 }
 
 /* Subtle note tooltip */

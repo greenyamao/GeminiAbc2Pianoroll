@@ -1,6 +1,7 @@
 /**
  * ABC Detection & DOM Injection Engine for Google NotebookLM
  * High-performance, zero-backtracking, virtualization-friendly engine.
+ * Directly replaces ABC blocks in-place and hides raw notation.
  * Renders at most 5 active widgets from the bottom; older history is lazy-loaded on scroll.
  */
 
@@ -227,7 +228,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
   widget.dataset.attachedAbc = 'true';
   widget.dataset.abcSnippet = abcString.slice(0, 40).replace(/\s+/g, '_');
 
-  // Compact Single-Row Toolbar
+  // Compact Single-Row Toolbar (Ultra-clean DAW transport bar)
   const toolbar = document.createElement('div');
   toolbar.className = 'fl-toolbar';
 
@@ -259,7 +260,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
   leftGroup.appendChild(stopBtn);
   leftGroup.appendChild(lcd);
 
-  // Right Section: Expression pill + Volume pill + Shortcuts info + ABC code toggle
+  // Right Section: Expression pill + Volume pill + Shortcuts info
   const rightGroup = document.createElement('div');
   rightGroup.className = 'fl-toolbar-right';
 
@@ -293,16 +294,9 @@ function createPianoRollWidget(abcString, originalHostElement) {
   shortcutsBtn.innerHTML = '⌨';
   shortcutsBtn.title = 'Keyboard Shortcuts:\n• Space: Play / Pause\n• Ctrl + Wheel: Horizontal Zoom (Time)\n• Alt + Wheel: Vertical Zoom (Keys)\n• Shift + Wheel: Horizontal Scroll\n• Click/Drag: Pan & Seek';
 
-  // Raw ABC source button
-  const rawBtn = document.createElement('button');
-  rawBtn.className = 'fl-btn fl-btn-raw';
-  rawBtn.innerHTML = '📄 ABC';
-  rawBtn.title = 'Show/hide ABC source notation';
-
   rightGroup.appendChild(exprPill);
   rightGroup.appendChild(volPill);
   rightGroup.appendChild(shortcutsBtn);
-  rightGroup.appendChild(rawBtn);
 
   toolbar.appendChild(leftGroup);
   toolbar.appendChild(rightGroup);
@@ -311,26 +305,8 @@ function createPianoRollWidget(abcString, originalHostElement) {
   const canvasWrap = document.createElement('div');
   canvasWrap.className = 'fl-canvas-wrap';
 
-  // Raw ABC drawer
-  const rawDrawer = document.createElement('div');
-  rawDrawer.className = 'fl-raw-drawer';
-  rawDrawer.innerHTML = `
-    <div class="fl-raw-header">
-      <span>ABC Notation Source</span>
-      <button class="fl-copy-btn">Copy</button>
-    </div>
-    <div class="fl-raw-code">${escapeHtml(abcString)}</div>
-  `;
-  const copyBtn = rawDrawer.querySelector('.fl-copy-btn');
-  copyBtn.onclick = () => {
-    navigator.clipboard.writeText(abcString);
-    copyBtn.textContent = 'Copied!';
-    setTimeout(() => copyBtn.textContent = 'Copy', 2000);
-  };
-
   widget.appendChild(toolbar);
   widget.appendChild(canvasWrap);
-  widget.appendChild(rawDrawer);
 
   // Initialize Synth and Canvas (Zero upfront Web Audio allocations)
   const synth = new PianoRollSynth({
@@ -420,11 +396,6 @@ function createPianoRollWidget(abcString, originalHostElement) {
     synth.setExpression(val);
   };
 
-  rawBtn.onclick = () => {
-    rawDrawer.classList.toggle('is-open');
-    rawBtn.classList.toggle('fl-btn-active-toggle', rawDrawer.classList.contains('is-open'));
-  };
-
   // Intercept middle-click (wheel click) on widget to prevent browser page autoscroll
   widget.addEventListener('mousedown', (e) => {
     if (e.button === 1) e.preventDefault();
@@ -442,7 +413,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
 }
 
 /**
- * Inspects a NotebookLM chat message and safely attaches Piano Roll widgets
+ * Inspects a NotebookLM chat message and replaces ABC blocks in-place with Piano Roll widgets
  * @param {HTMLElement} messageNode
  * @param {boolean} immediate - If true, mounts full widget immediately; if false, mounts lazy placeholder
  */
@@ -456,10 +427,8 @@ function processNotebookLMMessage(messageNode, immediate = true) {
     return;
   }
 
-  let processedCount = 0;
-
-  // Strategy 1: Process markdown code blocks (<pre> elements)
-  const preElements = messageNode.querySelectorAll('pre');
+  // 1. First: inspect all code blocks (<pre> elements)
+  const preElements = Array.from(messageNode.querySelectorAll('pre'));
   for (const pre of preElements) {
     if (pre.dataset.flAttached === 'true') continue;
     if (pre.closest('.fl-widget-container, .fl-lazy-placeholder')) continue;
@@ -469,82 +438,49 @@ function processNotebookLMMessage(messageNode, immediate = true) {
       const abcMatch = extractABC(preText);
       if (abcMatch) {
         const container = pre.closest('.code-block, .snippet-container, pre') || pre;
-        const host = container;
         const elem = immediate
-          ? createPianoRollWidget(abcMatch.abcString, host)
-          : createLazyPlaceholder(abcMatch.abcString, host);
+          ? createPianoRollWidget(abcMatch.abcString, container)
+          : createLazyPlaceholder(abcMatch.abcString, container);
 
         if (elem) {
           pre.dataset.flAttached = 'true';
-          pre.style.display = 'none';
-          host.parentElement.insertBefore(elem, host.nextSibling);
-          processedCount++;
+          container.dataset.flAttached = 'true';
+          container.style.display = 'none'; // Hide the ABC code block cleanly
+          // Insert the Piano Roll widget in-place directly where the ABC code was!
+          container.parentElement.insertBefore(elem, container);
         }
       }
     }
   }
 
-  // Strategy 2: Process unformatted text and paragraphs for remaining ABC blocks
+  // 2. Second: inspect plain text paragraphs (ONLY those that do NOT contain or belong to code blocks)
   const textContainer = messageNode.querySelector('.message-text-content') || messageNode;
-  const rawText = textContainer.textContent || '';
-  const allFound = extractAllABC(rawText);
+  const paragraphs = Array.from(textContainer.querySelectorAll('.paragraph.normal, paragraph-element-view, p'));
 
-  if (allFound.length > 0) {
-    const candidateNodes = textContainer.querySelectorAll('.paragraph.normal, paragraph-element-view, p, div');
+  for (const p of paragraphs) {
+    if (p.dataset.flAttached === 'true') continue;
+    if (p.closest('.fl-widget-container, .fl-lazy-placeholder, pre')) continue;
+    if (p.querySelector('.fl-widget-container, .fl-lazy-placeholder, pre')) continue;
 
-    for (const item of allFound) {
-      const snippetKey = item.abcString.slice(0, 40).replace(/\s+/g, '_');
-
-      // Check if widget or lazy placeholder for this ABC block already exists
-      const existingElements = messageNode.querySelectorAll('.fl-widget-container, .fl-lazy-placeholder');
-      let alreadyExists = false;
-      for (const el of existingElements) {
-        if (el.dataset.abcSnippet === snippetKey) {
-          alreadyExists = true;
-          break;
-        }
-      }
-      if (alreadyExists) continue;
-
-      const snippet = item.abcString.replace(/^X:\d+\n/, '').trim().slice(0, 25);
-      let targetNode = null;
-
-      for (const node of candidateNodes) {
-        if (node.dataset.flAttached === 'true') continue;
-        if (node.closest('.fl-widget-container, .fl-lazy-placeholder')) continue;
-        if (node.querySelector('.fl-widget-container, .fl-lazy-placeholder')) continue;
-
-        if (node.textContent && node.textContent.includes(snippet)) {
-          targetNode = node;
-          break;
-        }
-      }
-
-      if (targetNode && targetNode.dataset.flAttached !== 'true') {
+    const pText = p.textContent || '';
+    if (hasMusicContent(pText)) {
+      const allFound = extractAllABC(pText);
+      for (const item of allFound) {
         const elem = immediate
-          ? createPianoRollWidget(item.abcString, targetNode)
-          : createLazyPlaceholder(item.abcString, targetNode);
+          ? createPianoRollWidget(item.abcString, p)
+          : createLazyPlaceholder(item.abcString, p);
 
         if (elem) {
-          targetNode.dataset.flAttached = 'true';
-          targetNode.style.display = 'none';
-          targetNode.parentElement.insertBefore(elem, targetNode.nextSibling);
-          processedCount++;
-        }
-      } else if (!targetNode && !messageNode.querySelector(`[data-abc-snippet="${snippetKey}"]`)) {
-        const elem = immediate
-          ? createPianoRollWidget(item.abcString, textContainer)
-          : createLazyPlaceholder(item.abcString, textContainer);
-
-        if (elem) {
-          textContainer.appendChild(elem);
-          processedCount++;
+          p.dataset.flAttached = 'true';
+          p.style.display = 'none'; // Hide the raw ABC paragraph cleanly
+          // Insert the Piano Roll widget in-place directly where the ABC text was!
+          p.parentElement.insertBefore(elem, p);
         }
       }
     }
   }
 
-  // Mark this message node as completely processed to prevent any duplicate execution
+  // Mark this message node as completely processed
   messageNode.dataset.flProcessed = 'true';
 }
 
