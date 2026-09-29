@@ -105,8 +105,10 @@ function extractAllABC(text) {
     // Unformatted text lines
     const isHeader = /^[A-Za-z]:\s*.+/.test(line);
     const isMusicLine = line.includes('|') && /[A-Ga-g]/.test(line);
+    const isComment = line.startsWith('%');
+    const isVoiceDirective = /^\[V:[^\]]+\]/.test(line);
 
-    if (isHeader || (inBlock && isMusicLine)) {
+    if (isHeader || (inBlock && (isMusicLine || isComment || isVoiceDirective))) {
       if (!inBlock) {
         // Potential start of an unformatted ABC score
         if (/^[XMTK]:/i.test(line)) {
@@ -453,35 +455,69 @@ function processNotebookLMMessage(messageNode, immediate = true) {
     }
   }
 
-  // 2. Second: inspect plain text paragraphs (ONLY those that do NOT contain or belong to code blocks)
-  const textContainer = messageNode.querySelector('.message-text-content') || messageNode;
-  const paragraphs = Array.from(textContainer.querySelectorAll('.paragraph.normal, paragraph-element-view, p'));
+  // 2. Second: inspect all text blocks across the message
+  const fullText = messageNode.textContent || '';
+  if (hasMusicContent(fullText)) {
+    const allFound = extractAllABC(fullText);
+    for (const item of allFound) {
+      const snippetId = item.abcString.slice(0, 40).replace(/\s+/g, '_');
+      if (messageNode.querySelector(`[data-abc-snippet="${snippetId}"]`)) {
+        continue;
+      }
 
-  for (const p of paragraphs) {
-    if (p.dataset.flAttached === 'true') continue;
-    if (p.closest('.fl-widget-container, .fl-lazy-placeholder, pre')) continue;
-    if (p.querySelector('.fl-widget-container, .fl-lazy-placeholder, pre')) continue;
+      // Find candidate elements in messageNode
+      const candidates = Array.from(messageNode.querySelectorAll('p, div, paragraph-element-view, [class*="paragraph"]'));
+      const firstLine = item.abcString.split('\n')[0].trim();
+      let targetEl = null;
 
-    const pText = p.textContent || '';
-    if (hasMusicContent(pText)) {
-      const allFound = extractAllABC(pText);
-      for (const item of allFound) {
-        const elem = immediate
-          ? createPianoRollWidget(item.abcString, p)
-          : createLazyPlaceholder(item.abcString, p);
+      for (const el of candidates) {
+        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) continue;
+        if (el.textContent && el.textContent.includes(firstLine)) {
+          targetEl = el;
+          break;
+        }
+      }
 
-        if (elem) {
-          p.dataset.flAttached = 'true';
-          p.style.display = 'none'; // Hide the raw ABC paragraph cleanly
-          // Insert the Piano Roll widget in-place directly where the ABC text was!
-          p.parentElement.insertBefore(elem, p);
+      // Fallback: look for music line with barline
+      if (!targetEl) {
+        const musicLine = item.abcString.split('\n').find(l => l.includes('|') && /[A-Ga-g]/.test(l));
+        if (musicLine) {
+          for (const el of candidates) {
+            if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer')) continue;
+            if (el.textContent && el.textContent.includes(musicLine.trim())) {
+              targetEl = el;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!targetEl) {
+        targetEl = messageNode.querySelector('.message-text-content, .message-content') || messageNode;
+      }
+
+      const hostContainer = targetEl.closest('.paragraph, [class*="paragraph"], p, pre, .code-block, paragraph-element-view') || targetEl;
+
+      const elem = immediate
+        ? createPianoRollWidget(item.abcString, hostContainer)
+        : createLazyPlaceholder(item.abcString, hostContainer);
+
+      if (elem) {
+        if (hostContainer !== messageNode && hostContainer.parentElement) {
+          hostContainer.style.display = 'none';
+          hostContainer.parentElement.insertBefore(elem, hostContainer);
+        } else {
+          targetEl.style.display = 'none';
+          targetEl.parentElement.insertBefore(elem, targetEl);
         }
       }
     }
   }
 
-  // Mark this message node as completely processed
-  messageNode.dataset.flProcessed = 'true';
+  // Mark this message node as completely processed only if we successfully attached or confirmed no music
+  if (messageNode.querySelector('.fl-widget-container, .fl-lazy-placeholder') || !hasMusicContent(messageNode.textContent || '')) {
+    messageNode.dataset.flProcessed = 'true';
+  }
 }
 
 /**
@@ -1107,10 +1143,17 @@ class NotebookLMWatcher {
 
   start() {
     // Initial scan after page load
-    this.scheduleScan(600);
+    this.scheduleScan(400);
     this.initComposer();
 
-    // MutationObserver watches for new chat messages and query box
+    // Safety polling timer: catches any streamed responses even if DOM mutations were skipped
+    if (!this.safetyInterval) {
+      this.safetyInterval = setInterval(() => {
+        this.scan();
+      }, 1500);
+    }
+
+    // MutationObserver watches for any newly added nodes in document
     this.observer = new MutationObserver((mutations) => {
       let shouldScan = false;
 
@@ -1122,7 +1165,6 @@ class NotebookLMWatcher {
           }
         }
 
-        // Check if any newly added node is a chat container or query box
         for (const node of m.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
             if (node.classList?.contains('fl-widget-container') ||
@@ -1132,11 +1174,8 @@ class NotebookLMWatcher {
               continue;
             }
 
-            if (node.matches?.('chat-message, .to-user-container, model-response, query-box, .query-box, textarea') ||
-                node.querySelector?.('chat-message, .to-user-container, model-response, query-box, .query-box, textarea')) {
-              shouldScan = true;
-              break;
-            }
+            shouldScan = true;
+            break;
           }
         }
 
@@ -1144,14 +1183,14 @@ class NotebookLMWatcher {
       }
 
       if (shouldScan) {
-        this.scheduleScan(400);
+        this.scheduleScan(350);
       }
     });
 
     this.observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  scheduleScan(delay = 400) {
+  scheduleScan(delay = 350) {
     if (this.scanTimer) clearTimeout(this.scanTimer);
     this.scanTimer = setTimeout(() => {
       this.scanTimer = null;
@@ -1166,7 +1205,35 @@ class NotebookLMWatcher {
     try {
       this.initComposer();
 
-      const messageNodes = Array.from(document.querySelectorAll('chat-message, .to-user-container, model-response'));
+      const candidateSelectors = [
+        'chat-message',
+        '.chat-message',
+        '.to-user-container',
+        'model-response',
+        '.model-response',
+        'conversation-turn',
+        '.conversation-turn',
+        '.chat-turn',
+        '.message-container'
+      ];
+      let messageNodes = Array.from(document.querySelectorAll(candidateSelectors.join(', ')));
+
+      // Also discover any other turn or message containers containing unprocessed ABC music
+      const allDivs = document.querySelectorAll('div, section, article');
+      for (const el of allDivs) {
+        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-drawer, form')) continue;
+        if (el.dataset?.flProcessed === 'true') continue;
+        if (el.querySelector('.fl-widget-container, .fl-lazy-placeholder')) continue;
+        const txt = el.textContent || '';
+        if (txt.length > 20 && txt.includes('|') && /[A-Ga-g]/.test(txt) && hasMusicContent(txt)) {
+          if (!messageNodes.some(m => m === el || m.contains(el))) {
+            if (!el.parentElement || !hasMusicContent(el.parentElement.textContent || '')) {
+              messageNodes.push(el);
+            }
+          }
+        }
+      }
+
       if (messageNodes.length === 0) return;
 
       const candidateMessages = [];
