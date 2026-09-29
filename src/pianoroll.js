@@ -330,6 +330,12 @@ class FLPianoRoll {
     return NOTE_NAMES[((pitch % 12) + 12) % 12] + octave;
   }
 
+  quantizeBeat(val, step = (this.snapStep || 0.25)) {
+    if (!step || step <= 0) step = 0.25;
+    const snapped = Math.round(val / step) * step;
+    return Math.round(snapped * 10000) / 10000;
+  }
+
   isNearNoteRightEdge(note, x, y) {
     const nx = this.xAtBeat(note.startBeat);
     const nw = Math.max(8, (note.duration * this.zoomX) - 1.5);
@@ -402,9 +408,9 @@ class FLPianoRoll {
     if (step <= 0) return rawBeat;
 
     if (mode === 'floor') {
-      return Math.floor(rawBeat / step) * step;
+      return Math.round(Math.floor(rawBeat / step) * step * 10000) / 10000;
     }
-    return Math.round(rawBeat / step) * step;
+    return Math.round(Math.round(rawBeat / step) * step * 10000) / 10000;
   }
 
   seekTo(beat) {
@@ -580,14 +586,15 @@ class FLPianoRoll {
 
       // 5. Left Click on empty grid area
       if (this.editable && x > kw && x < this.width - vsw && y > rh && y < sbY) {
-        // Draw note immediately in FL Studio style with cell snapping!
+        // Draw note immediately in FL Studio style with cell snapping and strict quantization!
         const pitch = this.pitchAtY(y);
+        const step = this.snapStep || 0.25;
         const beat = this.beatAtX(x, 'floor');
         if (pitch !== null && beat >= 0) {
           if (!this.musicData) {
             this.initEmptyScore();
           }
-          const duration = this.lastNoteDuration || 1.0;
+          const duration = Math.max(step, this.quantizeBeat(this.lastNoteDuration || 1.0, step));
           const newNote = {
             pitch: pitch,
             name: this.midiToNoteName(pitch),
@@ -725,8 +732,8 @@ class FLPianoRoll {
       if (this.isMovingNote && this.movingNote) {
         const dx = x - this.moveStartMouseX;
         const deltaBeats = dx / this.zoomX;
-        const snap = this.snapStep || 0.25;
-        let newBeat = Math.max(0, Math.round((this.moveStartBeat + deltaBeats) / snap) * snap);
+        const step = this.snapStep || 0.25;
+        let newBeat = Math.max(0, this.quantizeBeat(this.moveStartBeat + deltaBeats, step));
         const newPitch = this.pitchAtY(y);
 
         let changed = false;
@@ -759,11 +766,10 @@ class FLPianoRoll {
 
       // Active note resizing (FL Studio right-edge drag with snapping)
       if (this.isResizingNote && this.resizingNote) {
-        const snap = this.snapStep || 0.25;
+        const step = this.snapStep || 0.25;
         const currentRawBeat = (x - kw + this.scrollX) / this.zoomX;
-        const targetEndBeat = Math.max(this.resizingNote.startBeat + snap, Math.round(currentRawBeat / snap) * snap);
-        let newDuration = Math.max(snap, targetEndBeat - this.resizingNote.startBeat);
-        newDuration = Math.round(newDuration / snap) * snap;
+        const targetEndBeat = Math.max(this.resizingNote.startBeat + step, this.quantizeBeat(currentRawBeat, step));
+        let newDuration = Math.max(step, this.quantizeBeat(targetEndBeat - this.resizingNote.startBeat, step));
 
         if (newDuration !== this.resizingNote.duration) {
           this.resizingNote.duration = newDuration;

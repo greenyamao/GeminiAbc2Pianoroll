@@ -522,8 +522,45 @@ function midiToABCPitch(midiPitch) {
   return noteStr;
 }
 
+function quantize(val, step = 0.25) {
+  return Math.round(Math.round(val / step) * step * 10000) / 10000;
+}
+
+function formatABCRest(restInBeats) {
+  let remUnits = Math.round(quantize(restInBeats, 0.25) * 4) / 2; // In 1/8 units
+  let out = '';
+
+  while (remUnits >= 0.25) {
+    if (remUnits >= 8) {
+      out += 'z8 ';
+      remUnits -= 8;
+    } else if (remUnits >= 6) {
+      out += 'z6 ';
+      remUnits -= 6;
+    } else if (remUnits >= 4) {
+      out += 'z4 ';
+      remUnits -= 4;
+    } else if (remUnits >= 3) {
+      out += 'z3 ';
+      remUnits -= 3;
+    } else if (remUnits >= 2) {
+      out += 'z2 ';
+      remUnits -= 2;
+    } else if (remUnits >= 1) {
+      out += 'z ';
+      remUnits -= 1;
+    } else if (remUnits >= 0.5) {
+      out += 'z/2 ';
+      remUnits -= 0.5;
+    } else {
+      break;
+    }
+  }
+  return out;
+}
+
 function formatABCDuration(durationInBeats) {
-  const units = Math.round(durationInBeats * 4) / 2; // L:1/8 -> 0.5 beat = 1 unit
+  const units = Math.round(quantize(durationInBeats, 0.25) * 4) / 2; // L:1/8 -> 0.5 beat = 1 unit
   if (units === 1) return '';
   if (units === 0.5) return '/2';
   if (units === 0.25) return '/4';
@@ -542,18 +579,21 @@ function notesToABC(notes, options = {}) {
     return header + '| z8 | z8 |\n';
   }
 
-  // Sort notes by startBeat, then pitch
-  const sorted = [...notes].sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch);
+  // Strictly quantize all note timings to clean musical fractions (1/16th note steps)
+  const cleanNotes = notes.map(n => ({
+    pitch: n.pitch,
+    startBeat: Math.max(0, quantize(n.startBeat, 0.25)),
+    duration: Math.max(0.25, quantize(n.duration, 0.25))
+  })).sort((a, b) => a.startBeat - b.startBeat || a.pitch - b.pitch);
 
   // Group notes into simultaneous time steps
   const groups = [];
   let currentGroup = null;
 
-  for (const n of sorted) {
-    const roundedBeat = Math.round(n.startBeat * 4) / 4;
-    if (!currentGroup || Math.abs(currentGroup.startBeat - roundedBeat) > 0.05) {
+  for (const n of cleanNotes) {
+    if (!currentGroup || Math.abs(currentGroup.startBeat - n.startBeat) > 0.05) {
       currentGroup = {
-        startBeat: roundedBeat,
+        startBeat: n.startBeat,
         notes: [n]
       };
       groups.push(currentGroup);
@@ -571,13 +611,13 @@ function notesToABC(notes, options = {}) {
     // Check for rest before this group
     while (group.startBeat > currentBeat + 0.05) {
       const nextBarBeat = (Math.floor(currentBeat / beatsPerMeasure) + 1) * beatsPerMeasure;
-      const restDuration = Math.min(group.startBeat - currentBeat, nextBarBeat - currentBeat);
+      const restBeats = Math.min(group.startBeat - currentBeat, nextBarBeat - currentBeat);
+      const cleanRestBeats = quantize(restBeats, 0.25);
 
-      const restUnits = Math.round(restDuration * 2);
-      if (restUnits > 0) {
-        body += (restUnits === 1 ? 'z ' : `z${restUnits} `);
+      if (cleanRestBeats > 0) {
+        body += formatABCRest(cleanRestBeats);
       }
-      currentBeat += restDuration;
+      currentBeat = quantize(currentBeat + cleanRestBeats, 0.25);
 
       if (Math.abs(currentBeat - nextBarBeat) < 0.05) {
         body += '| ';
@@ -595,8 +635,8 @@ function notesToABC(notes, options = {}) {
       body += `[${notesStr}]${durStr} `;
     }
 
-    const groupDur = Math.max(...group.notes.map(n => n.duration));
-    currentBeat += groupDur;
+    const groupDur = quantize(Math.max(...group.notes.map(n => n.duration)), 0.25);
+    currentBeat = quantize(currentBeat + groupDur, 0.25);
 
     // Check measure boundary
     const measureRem = currentBeat % beatsPerMeasure;
@@ -613,20 +653,37 @@ function notesToABC(notes, options = {}) {
 }
 
 /**
+ * Finds the exact NotebookLM query textarea from user's DOM
+ */
+function findNotebookLMTextarea() {
+  return (
+    document.querySelector('textarea.query-box-input') ||
+    document.querySelector('textarea[aria-label="Query box"]') ||
+    document.querySelector('textarea[placeholder*="Ask a question"]') ||
+    document.querySelector('.query-box-input-wrapper textarea') ||
+    document.querySelector('form.form textarea') ||
+    document.querySelector('query-box textarea') ||
+    document.querySelector('textarea')
+  );
+}
+
+/**
  * Finds NotebookLM input prompt container
  */
 function findNotebookLMInputContainer() {
+  const textarea = findNotebookLMTextarea();
+  if (textarea) {
+    const form = textarea.closest('form.form, form, .message-container, query-box, .query-box');
+    if (form) return form;
+  }
+
   const selectors = [
+    'form.form:has(textarea.query-box-input)',
+    'form:has(.query-box-input)',
+    '.message-container',
+    '.query-box-input-wrapper',
     'query-box',
-    '.query-box',
-    '.query-bar',
-    '.chat-input-area',
-    '.chat-input-container',
-    '.input-box-container',
-    'form:has(textarea)',
-    'div:has(> textarea)',
-    'form:has([contenteditable])',
-    'div:has(> [contenteditable="true"])'
+    '.query-box'
   ];
 
   for (const sel of selectors) {
@@ -636,11 +693,6 @@ function findNotebookLMInputContainer() {
     } catch (e) {}
   }
 
-  const input = document.querySelector('textarea, [contenteditable="true"]');
-  if (input) {
-    return input.closest('form, .input-area, .chat-bar, .query-container') || input.parentElement;
-  }
-
   return null;
 }
 
@@ -648,7 +700,7 @@ function findNotebookLMInputContainer() {
  * Bulletproof prompt text inserter supporting textarea and contenteditable
  */
 function insertTextIntoNotebookLM(textToInsert) {
-  const input = document.querySelector('query-box textarea, .query-box textarea, textarea, [contenteditable="true"]');
+  const input = findNotebookLMTextarea();
   if (!input) {
     if (navigator.clipboard) navigator.clipboard.writeText(textToInsert);
     return false;
@@ -667,12 +719,9 @@ function insertTextIntoNotebookLM(textToInsert) {
     const prefix = (before.length > 0 && !before.endsWith('\n')) ? '\n\n' : '';
     const newText = before + prefix + textToInsert + '\n' + after;
 
-    const valueSetter = Object.getOwnPropertyDescriptor(input, 'value')?.set;
-    const prototype = Object.getPrototypeOf(input);
-    const prototypeValueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-    if (prototypeValueSetter && valueSetter !== prototypeValueSetter) {
-      prototypeValueSetter.call(input, newText);
-    } else if (valueSetter) {
+    const proto = window.HTMLTextAreaElement.prototype;
+    const valueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set;
+    if (valueSetter) {
       valueSetter.call(input, newText);
     } else {
       input.value = newText;
@@ -682,8 +731,32 @@ function insertTextIntoNotebookLM(textToInsert) {
     input.selectionStart = newPos;
     input.selectionEnd = newPos;
 
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+
+    try {
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: textToInsert
+      }));
+    } catch (e) {}
+
+    // Enable NotebookLM submit button
+    const form = input.closest('form');
+    if (form) {
+      const submitBtn = form.querySelector('nb-icon-button.submit-button button, button[aria-label="Submit"]');
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.removeAttribute('disabled');
+        submitBtn.classList.remove('mat-mdc-button-disabled');
+      }
+      const nbBtn = form.querySelector('nb-icon-button.submit-button');
+      if (nbBtn) {
+        nbBtn.classList.remove('nb-button-disabled');
+      }
+    }
   } else if (input.isContentEditable) {
     const sel = window.getSelection();
     if (sel && sel.rangeCount > 0) {
@@ -736,9 +809,20 @@ class NotebookLMComposer {
       };
     }
 
-    const btnRow = inputContainer.querySelector('.buttons, .actions, .controls, .bottom-row, .leading-actions') || inputContainer;
-    if (!btnRow.contains(this.toggleBtn)) {
-      btnRow.appendChild(this.toggleBtn);
+    // Place toggleBtn in .bottom-right-container or input bar
+    const bottomRight = inputContainer.querySelector('.bottom-right-container');
+    if (bottomRight) {
+      const selectedNum = bottomRight.querySelector('.selected-num-container');
+      if (selectedNum && !bottomRight.contains(this.toggleBtn)) {
+        bottomRight.insertBefore(this.toggleBtn, selectedNum);
+      } else if (!bottomRight.contains(this.toggleBtn)) {
+        bottomRight.prepend(this.toggleBtn);
+      }
+    } else {
+      const btnRow = inputContainer.querySelector('.buttons, .actions, .controls, .bottom-row, .leading-actions') || inputContainer;
+      if (!btnRow.contains(this.toggleBtn)) {
+        btnRow.appendChild(this.toggleBtn);
+      }
     }
 
     // 2. Create Drawer if not created yet
@@ -969,8 +1053,9 @@ class NotebookLMComposer {
       };
     }
 
-    if (this.drawer.parentElement !== inputContainer.parentElement) {
-      inputContainer.parentElement.insertBefore(this.drawer, inputContainer);
+    const hostForm = inputContainer.closest('form.form, form') || inputContainer;
+    if (this.drawer.parentElement !== hostForm.parentElement) {
+      hostForm.parentElement.insertBefore(this.drawer, hostForm);
     }
   }
 
