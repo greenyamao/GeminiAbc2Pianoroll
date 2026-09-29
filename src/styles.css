@@ -153,6 +153,20 @@
   color: #ffffff;
 }
 
+.fl-btn-copy-to-piano {
+  background: #172635;
+  border-color: #0284c7;
+  color: #38bdf8;
+  font-weight: 600;
+  padding: 3px 8px;
+}
+
+.fl-btn-copy-to-piano:hover {
+  background: #0284c7;
+  border-color: #7dd3fc;
+  color: #ffffff;
+}
+
 /* Compact Tool Pills (Expression & Volume) */
 .fl-tool-pill {
   display: inline-flex;

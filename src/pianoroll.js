@@ -288,9 +288,13 @@ class FLPianoRoll {
 
     this.scrollX = 0;
     this.currentBeat = 0;
+    this.playOriginBeat = 0;
     this.activePitches.clear();
 
     this.render();
+    if (this.onNotesChange && this.musicData) {
+      this.onNotesChange(this.musicData.notes);
+    }
   }
 
   initEmptyScore() {

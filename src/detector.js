@@ -258,9 +258,32 @@ function createPianoRollWidget(abcString, originalHostElement) {
     <span class="fl-lcd-bpm">${musicData.tempo}<small>BPM</small></span>
   `;
 
+  const copyToPianoBtn = document.createElement('button');
+  copyToPianoBtn.className = 'fl-btn fl-btn-copy-to-piano';
+  copyToPianoBtn.innerHTML = '🎹 Copy to Piano';
+  copyToPianoBtn.title = 'Copy notes directly into your editable Piano Roll (replaces existing notes)';
+  copyToPianoBtn.onclick = () => {
+    if (synth && synth.isPlaying) {
+      synth.pause();
+    }
+    if (!activeComposer) {
+      activeComposer = new NotebookLMComposer();
+      const container = findNotebookLMInputContainer() || document.body;
+      activeComposer.init(container);
+    }
+    activeComposer.loadScore(musicData);
+
+    const oldHtml = copyToPianoBtn.innerHTML;
+    copyToPianoBtn.innerHTML = '✔ Copied!';
+    setTimeout(() => {
+      copyToPianoBtn.innerHTML = oldHtml;
+    }, 1200);
+  };
+
   leftGroup.appendChild(playBtn);
   leftGroup.appendChild(stopBtn);
   leftGroup.appendChild(lcd);
+  leftGroup.appendChild(copyToPianoBtn);
 
   // Right Section: Expression pill + Volume pill + Shortcuts info
   const rightGroup = document.createElement('div');
@@ -1205,6 +1228,53 @@ class NotebookLMComposer {
     } else if (!this.isOpen && this.synth && this.synth.isPlaying) {
       this.synth.stop(true);
     }
+  }
+
+  /**
+   * Loads score notes directly into the composer, replacing any existing notes
+   */
+  loadScore(musicData) {
+    if (!this.drawer || !this.pianoRoll) {
+      const container = findNotebookLMInputContainer() || document.body;
+      this.init(container);
+    }
+
+    if (!musicData) return;
+
+    // Deep clone notes so editing in composer doesn't mutate widget score
+    const clonedNotes = (musicData.notes || []).map(n => ({
+      pitch: n.pitch,
+      name: n.name || '',
+      startBeat: n.startBeat,
+      duration: n.duration,
+      velocity: (n.velocity !== undefined) ? n.velocity : 80
+    }));
+
+    const clonedData = {
+      title: musicData.title || 'Composition',
+      key: musicData.key || 'C',
+      meter: musicData.meter || '4/4',
+      tempo: musicData.tempo || 120,
+      beatsPerMeasure: musicData.beatsPerMeasure || 4,
+      totalBeats: Math.max(16, musicData.totalBeats || 16),
+      minPitch: (typeof musicData.minPitch === 'number') ? musicData.minPitch : 21,
+      maxPitch: (typeof musicData.maxPitch === 'number') ? musicData.maxPitch : 108,
+      notes: clonedNotes
+    };
+
+    if (this.synth && this.synth.isPlaying) {
+      this.synth.stop(true);
+    }
+
+    if (this.pianoRoll) {
+      this.pianoRoll.setData(clonedData);
+      if (this.lcdNotes) {
+        const count = clonedNotes.length;
+        this.lcdNotes.textContent = `${count} note${count === 1 ? '' : 's'}`;
+      }
+    }
+
+    this.toggle(true);
   }
 }
 
