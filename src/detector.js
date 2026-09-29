@@ -790,9 +790,31 @@ class NotebookLMComposer {
       leftGroup.appendChild(clearBtn);
       leftGroup.appendChild(lcd);
 
-      // Right section: Expression + Volume + Insert + Close
+      // Right section: Snap + Expression + Volume + Insert + Close
       const rightGroup = document.createElement('div');
       rightGroup.className = 'fl-toolbar-right';
+
+      const snapPill = document.createElement('div');
+      snapPill.className = 'fl-tool-pill';
+      snapPill.title = 'Grid Snap (FL Studio Magnet)';
+      snapPill.innerHTML = `
+        <span class="fl-tool-icon">🧲</span>
+        <select class="fl-snap-select" title="Grid Snap Step">
+          <option value="0.25" selected>1/4 Step</option>
+          <option value="0.5">1/2 Beat</option>
+          <option value="1">1 Beat</option>
+          <option value="0.125">1/8 Fine</option>
+          <option value="4">1 Bar</option>
+        </select>
+      `;
+      const snapSelect = snapPill.querySelector('.fl-snap-select');
+      snapSelect.onchange = (e) => {
+        const val = parseFloat(e.target.value);
+        if (this.pianoRoll) {
+          this.pianoRoll.snapStep = val;
+          this.pianoRoll.render();
+        }
+      };
 
       const exprPill = document.createElement('div');
       exprPill.className = 'fl-tool-pill';
@@ -827,6 +849,7 @@ class NotebookLMComposer {
       closeBtn.title = 'Close Piano Roll (notes will be preserved)';
       closeBtn.onclick = () => this.toggle(false);
 
+      rightGroup.appendChild(snapPill);
       rightGroup.appendChild(exprPill);
       rightGroup.appendChild(volPill);
       rightGroup.appendChild(insertBtn);

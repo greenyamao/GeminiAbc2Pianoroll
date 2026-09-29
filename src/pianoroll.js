@@ -93,8 +93,17 @@ class FLPianoRoll {
     this.synth = options.synth || null;
     this.editable = !!this.options.editable;
     this.lastNoteDuration = 1.0; // FL Studio sticky note length
+    this.snapStep = (this.options.snapStep !== undefined) ? this.options.snapStep : 0.25;
     this.isResizingNote = false;
     this.resizingNote = null;
+    this.isMovingNote = false;
+    this.movingNote = null;
+    this.moveStartMouseX = 0;
+    this.moveStartMouseY = 0;
+    this.moveStartBeat = 0;
+    this.moveStartPitch = 60;
+    this.hasMovedNote = false;
+    this.hoverGrid = null;
     this.onNotesChange = this.options.onNotesChange || null;
     
     // Viewport state
@@ -380,16 +389,22 @@ class FLPianoRoll {
   }
 
   /**
-   * Convert pixel X to musical beat with grid snapping (0.25 beat snap)
+   * Convert pixel X to musical beat with grid snapping
+   * @param {number} x
+   * @param {'round'|'floor'|'none'} mode - Snapping mode: 'floor' for cell placement, 'round' for seek/move
    */
-  beatAtX(x, snap = true) {
+  beatAtX(x, mode = 'round') {
     const kw = this.options.keyboardWidth;
     const rawBeat = Math.max(0, (x - kw + this.scrollX) / this.zoomX);
-    if (!snap) return rawBeat;
+    if (mode === 'none' || mode === false) return rawBeat;
     
-    // Snap to 1/4 beat (16th note in 4/4) like FL Studio
-    const snapStep = 0.25;
-    return Math.round(rawBeat / snapStep) * snapStep;
+    const step = this.snapStep || 0.25;
+    if (step <= 0) return rawBeat;
+
+    if (mode === 'floor') {
+      return Math.floor(rawBeat / step) * step;
+    }
+    return Math.round(rawBeat / step) * step;
   }
 
   seekTo(beat) {
@@ -542,10 +557,19 @@ class FLPianoRoll {
             return;
           }
 
-          // Clicked note body: remember duration and play preview
+          // Clicked note body: start moving note in FL Studio style!
+          this.isMovingNote = true;
+          this.movingNote = clickedNote;
+          this.moveStartMouseX = x;
+          this.moveStartMouseY = y;
+          this.moveStartBeat = clickedNote.startBeat;
+          this.moveStartPitch = clickedNote.pitch;
+          this.hasMovedNote = false;
           this.lastNoteDuration = clickedNote.duration; // Remember duration
+          this.canvas.style.cursor = 'move';
           if (this.synth) this.synth.playNotePreview(clickedNote.pitch);
           if (this.options.onNoteClick) this.options.onNoteClick(clickedNote);
+          this.render();
           return;
         }
 
@@ -556,9 +580,9 @@ class FLPianoRoll {
 
       // 5. Left Click on empty grid area
       if (this.editable && x > kw && x < this.width - vsw && y > rh && y < sbY) {
-        // Draw note immediately in FL Studio style!
+        // Draw note immediately in FL Studio style with cell snapping!
         const pitch = this.pitchAtY(y);
-        const beat = this.beatAtX(x, true);
+        const beat = this.beatAtX(x, 'floor');
         if (pitch !== null && beat >= 0) {
           if (!this.musicData) {
             this.initEmptyScore();
@@ -593,7 +617,7 @@ class FLPianoRoll {
         this.synth.pause();
       }
 
-      const beat = this.beatAtX(x, true);
+      const beat = this.beatAtX(x, 'round');
       this.seekTo(beat);
       this.canvas.style.cursor = 'ew-resize';
     });
@@ -697,19 +721,60 @@ class FLPianoRoll {
         }
       }
 
-      // Active note resizing (FL Studio right-edge drag)
+      // Active note dragging / moving (FL Studio note movement with pitch and beat snapping)
+      if (this.isMovingNote && this.movingNote) {
+        const dx = x - this.moveStartMouseX;
+        const deltaBeats = dx / this.zoomX;
+        const snap = this.snapStep || 0.25;
+        let newBeat = Math.max(0, Math.round((this.moveStartBeat + deltaBeats) / snap) * snap);
+        const newPitch = this.pitchAtY(y);
+
+        let changed = false;
+        if (newBeat !== this.movingNote.startBeat) {
+          this.movingNote.startBeat = newBeat;
+          this.hasMovedNote = true;
+          changed = true;
+        }
+        if (newPitch !== null && newPitch >= 21 && newPitch <= 108 && newPitch !== this.movingNote.pitch) {
+          this.movingNote.pitch = newPitch;
+          this.movingNote.name = this.midiToNoteName(newPitch);
+          this.hasMovedNote = true;
+          changed = true;
+          if (this.synth) this.synth.playNotePreview(newPitch);
+        }
+
+        if (changed) {
+          if (this.musicData) {
+            this.musicData.totalBeats = Math.max(16, Math.max(this.musicData.totalBeats, newBeat + this.movingNote.duration + 4));
+            this.minPitch = Math.min(this.minPitch, Math.max(21, this.movingNote.pitch - 2));
+            this.maxPitch = Math.max(this.maxPitch, Math.min(108, this.movingNote.pitch + 2));
+            this.pitchRange = this.maxPitch - this.minPitch + 1;
+          }
+          this.render();
+          if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+        }
+        this.canvas.style.cursor = 'move';
+        return;
+      }
+
+      // Active note resizing (FL Studio right-edge drag with snapping)
       if (this.isResizingNote && this.resizingNote) {
-        const beat = this.beatAtX(x, true);
-        let newDuration = Math.max(0.25, beat - this.resizingNote.startBeat);
-        newDuration = Math.round(newDuration * 4) / 4; // snap to 0.25 beat
-        this.resizingNote.duration = newDuration;
-        this.lastNoteDuration = newDuration; // Remember duration
-        if (this.musicData) {
-          this.musicData.totalBeats = Math.max(16, Math.max(this.musicData.totalBeats, this.resizingNote.startBeat + newDuration + 4));
+        const snap = this.snapStep || 0.25;
+        const currentRawBeat = (x - kw + this.scrollX) / this.zoomX;
+        const targetEndBeat = Math.max(this.resizingNote.startBeat + snap, Math.round(currentRawBeat / snap) * snap);
+        let newDuration = Math.max(snap, targetEndBeat - this.resizingNote.startBeat);
+        newDuration = Math.round(newDuration / snap) * snap;
+
+        if (newDuration !== this.resizingNote.duration) {
+          this.resizingNote.duration = newDuration;
+          this.lastNoteDuration = newDuration; // Remember duration
+          if (this.musicData) {
+            this.musicData.totalBeats = Math.max(16, Math.max(this.musicData.totalBeats, this.resizingNote.startBeat + newDuration + 4));
+          }
+          this.render();
+          if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
         }
         this.canvas.style.cursor = 'ew-resize';
-        this.render();
-        if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
         return;
       }
 
@@ -718,16 +783,40 @@ class FLPianoRoll {
         const note = this.findNoteAt(x, y);
         if (note !== this.hoveredNote) {
           this.hoveredNote = note;
+        }
+
+        if (this.editable) {
+          if (note) {
+            this.hoverGrid = null;
+            if (this.isNearNoteRightEdge(note, x, y)) {
+              this.canvas.style.cursor = 'ew-resize';
+            } else {
+              this.canvas.style.cursor = 'move';
+            }
+          } else {
+            // Empty grid: update ghost note snapped position
+            const ghostBeat = this.beatAtX(x, 'floor');
+            const ghostPitch = this.pitchAtY(y);
+            this.hoverGrid = { beat: ghostBeat, pitch: ghostPitch };
+            this.canvas.style.cursor = 'crosshair';
+          }
+          this.render();
+        } else {
           this.render();
         }
-        if (this.editable && note) {
-          if (this.isNearNoteRightEdge(note, x, y)) {
-            this.canvas.style.cursor = 'ew-resize';
-          } else {
-            this.canvas.style.cursor = 'pointer';
-          }
+      } else {
+        if (this.hoveredNote || this.hoverGrid) {
+          this.hoveredNote = null;
+          this.hoverGrid = null;
+          this.render();
         }
-      } else if (this.hoveredNote) {
+      }
+    });
+
+    // Clear hover indicators on canvas leave
+    this.canvas.addEventListener('mouseleave', () => {
+      if (this.hoverGrid || this.hoveredNote) {
+        this.hoverGrid = null;
         this.hoveredNote = null;
         this.render();
       }
@@ -735,6 +824,16 @@ class FLPianoRoll {
 
     // MOUSE UP
     window.addEventListener('mouseup', () => {
+      if (this.isMovingNote) {
+        this.isMovingNote = false;
+        this.movingNote = null;
+        this.canvas.style.cursor = 'default';
+        if (this.hasMovedNote) {
+          this.render();
+          if (this.onNotesChange) this.onNotesChange(this.musicData.notes);
+        }
+      }
+
       if (this.isResizingNote) {
         this.isResizingNote = false;
         this.resizingNote = null;
@@ -935,6 +1034,9 @@ class FLPianoRoll {
     // 2. Measure and Beat Grid Lines
     this.drawGridLines(kw, rh, gridH);
 
+    // 2b. Ghost Note preview on hover (FL Studio pencil snap indicator)
+    this.drawGhostNote(kw, rh, gridH);
+
     // 3. Notes
     this.drawNotes(kw, rh, gridH);
 
@@ -991,34 +1093,92 @@ class FLPianoRoll {
 
     for (let b = 0; b <= totalBeats; b++) {
       const x = this.xAtBeat(b);
-      if (x < kw || x > this.width - vsw) continue;
-
-      const isMeasure = (b % beatsPerMeasure === 0);
-      
-      this.ctx.beginPath();
-      this.ctx.moveTo(x, rh);
-      this.ctx.lineTo(x, bottomY);
-
-      if (isMeasure) {
-        this.ctx.strokeStyle = this.colors.gridMeasureLine;
-        this.ctx.lineWidth = 1.5;
-      } else {
-        this.ctx.strokeStyle = this.colors.gridBeatLine;
-        this.ctx.lineWidth = 1;
-      }
-      this.ctx.stroke();
-
-      // Half-beat sub-line (eighth notes)
-      const subX = this.xAtBeat(b + 0.5);
-      if (subX >= kw && subX <= this.width - vsw && this.zoomX > 32) {
+      if (x >= kw && x <= this.width - vsw) {
+        const isMeasure = (b % beatsPerMeasure === 0);
         this.ctx.beginPath();
-        this.ctx.moveTo(subX, rh);
-        this.ctx.lineTo(subX, bottomY);
-        this.ctx.strokeStyle = this.colors.gridSubLine;
-        this.ctx.lineWidth = 0.5;
+        this.ctx.moveTo(x, rh);
+        this.ctx.lineTo(x, bottomY);
+
+        if (isMeasure) {
+          this.ctx.strokeStyle = this.colors.gridMeasureLine;
+          this.ctx.lineWidth = 1.5;
+        } else {
+          this.ctx.strokeStyle = this.colors.gridBeatLine;
+          this.ctx.lineWidth = 1;
+        }
         this.ctx.stroke();
       }
+
+      // Draw FL Studio sub-beat 8th and 16th step lines
+      if (b < totalBeats && this.zoomX >= 22) {
+        // 1/4 step (16th note)
+        const x1 = this.xAtBeat(b + 0.25);
+        if (x1 >= kw && x1 <= this.width - vsw && this.zoomX >= 36) {
+          this.ctx.beginPath();
+          this.ctx.moveTo(x1, rh);
+          this.ctx.lineTo(x1, bottomY);
+          this.ctx.strokeStyle = 'rgba(39, 52, 64, 0.45)';
+          this.ctx.lineWidth = 0.5;
+          this.ctx.stroke();
+        }
+
+        // 1/2 step (8th note)
+        const x2 = this.xAtBeat(b + 0.5);
+        if (x2 >= kw && x2 <= this.width - vsw) {
+          this.ctx.beginPath();
+          this.ctx.moveTo(x2, rh);
+          this.ctx.lineTo(x2, bottomY);
+          this.ctx.strokeStyle = this.colors.gridSubLine;
+          this.ctx.lineWidth = 0.75;
+          this.ctx.stroke();
+        }
+
+        // 3/4 step
+        const x3 = this.xAtBeat(b + 0.75);
+        if (x3 >= kw && x3 <= this.width - vsw && this.zoomX >= 36) {
+          this.ctx.beginPath();
+          this.ctx.moveTo(x3, rh);
+          this.ctx.lineTo(x3, bottomY);
+          this.ctx.strokeStyle = 'rgba(39, 52, 64, 0.45)';
+          this.ctx.lineWidth = 0.5;
+          this.ctx.stroke();
+        }
+      }
     }
+  }
+
+  drawGhostNote(kw, rh, gridH) {
+    if (!this.editable || !this.hoverGrid || this.isMovingNote || this.isResizingNote || this.isDragging || this.isScrubbing) {
+      return;
+    }
+    const { beat, pitch } = this.hoverGrid;
+    if (pitch === null || beat === null) return;
+
+    const x = this.xAtBeat(beat);
+    const w = Math.max(6, (this.lastNoteDuration * this.zoomX) - 1.5);
+    const y = this.yAtPitch(pitch) + 1;
+    const h = this.rowHeight - 2;
+    const vsw = this.options.verticalScrollbarWidth || 8;
+    const bottomY = rh + gridH;
+
+    if (x + w < kw || x > this.width - vsw || y + h < rh || y > bottomY) return;
+
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(143, 227, 162, 0.28)';
+    this.ctx.strokeStyle = 'rgba(143, 227, 162, 0.75)';
+    this.ctx.lineWidth = 1;
+    this.ctx.setLineDash([3, 2]);
+    this.roundRect(this.ctx, x, y, w, h, 2.5, true, true);
+
+    const noteLabel = this.midiToNoteName(pitch);
+    if (w > 16 && h >= 10) {
+      this.ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+      this.ctx.font = 'bold 9.5px system-ui, sans-serif';
+      this.ctx.textAlign = 'left';
+      this.ctx.textBaseline = 'middle';
+      this.ctx.fillText(noteLabel, x + 4, y + (h / 2));
+    }
+    this.ctx.restore();
   }
 
   drawNotes(kw, rh, gridH) {
@@ -1035,17 +1195,18 @@ class FLPianoRoll {
       // Skip offscreen notes
       if (x + w < kw || x > this.width - vsw || y + h < rh || y > bottomY) continue;
 
+      const isBeingMoved = (this.isMovingNote && this.movingNote === n);
       const isHovered = (this.hoveredNote === n);
       const isSounding = this.activePitches.has(n.pitch) && 
         (this.currentBeat >= n.startBeat && this.currentBeat < (n.startBeat + n.duration));
 
       // Note body
-      this.ctx.fillStyle = isSounding ? '#c7ffb0' : (isHovered ? this.colors.noteHover : this.colors.noteBg);
+      this.ctx.fillStyle = isBeingMoved ? '#fde047' : (isSounding ? '#c7ffb0' : (isHovered ? this.colors.noteHover : this.colors.noteBg));
       this.roundRect(this.ctx, x, y, w, h, 2.5, true, false);
 
       // Note border
-      this.ctx.strokeStyle = isSounding ? '#2e7d32' : this.colors.noteBorder;
-      this.ctx.lineWidth = 1;
+      this.ctx.strokeStyle = isBeingMoved ? '#eab308' : (isSounding ? '#2e7d32' : this.colors.noteBorder);
+      this.ctx.lineWidth = isBeingMoved ? 1.5 : 1;
       this.roundRect(this.ctx, x, y, w, h, 2.5, false, true);
 
       // Pitch label inside the note (e.g. "F#6", "D#6", "C2", "G3")

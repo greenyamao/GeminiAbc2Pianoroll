@@ -172,7 +172,8 @@
   color: var(--fl-text-muted);
 }
 
-.fl-expr-select {
+.fl-expr-select,
+.fl-snap-select {
   background: transparent;
   border: none;
   color: #cbd5e1;
@@ -184,11 +185,13 @@
   padding: 0 2px;
 }
 
-.fl-expr-select:hover {
+.fl-expr-select:hover,
+.fl-snap-select:hover {
   color: #ffffff;
 }
 
-.fl-expr-select option {
+.fl-expr-select option,
+.fl-snap-select option {
   background: #172027;
   color: #f1f5f9;
 }
