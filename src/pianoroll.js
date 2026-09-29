@@ -121,6 +121,7 @@ class FLPianoRoll {
 
     // Playback state
     this.currentBeat = 0;
+    this.playOriginBeat = 0; // FL Studio-style start marker
     this.activePitches = new Set();
     this.hoveredNote = null;
 
@@ -429,6 +430,7 @@ class FLPianoRoll {
     const maxBeat = Math.max(this.musicData.totalBeats, 4);
     const clampedBeat = Math.max(0, Math.min(maxBeat, beat));
     this.currentBeat = clampedBeat;
+    this.playOriginBeat = clampedBeat;
 
     // Update active pitches for key lighting
     const activePitches = new Set();
@@ -540,7 +542,7 @@ class FLPianoRoll {
         
         // Pause audio voices during scrubbing so it doesn't glitch sound
         if (this.wasPlayingBeforeScrub && this.synth) {
-          this.synth.pause();
+          this.synth.pause(false);
         }
 
         const beat = this.beatAtX(x, true);
@@ -632,7 +634,7 @@ class FLPianoRoll {
       this.hoveredRulerX = null;
       this.wasPlayingBeforeScrub = this.synth ? (this.synth.isPlaying && !this.synth.isPaused) : false;
       if (this.wasPlayingBeforeScrub && this.synth) {
-        this.synth.pause();
+        this.synth.pause(false);
       }
 
       const beat = this.beatAtX(x, 'round');
@@ -862,6 +864,7 @@ class FLPianoRoll {
       if (this.isScrubbing) {
         this.isScrubbing = false;
         this.canvas.style.cursor = 'default';
+        this.playOriginBeat = this.currentBeat;
 
         if (this.wasPlayingBeforeScrub && this.synth && this.musicData) {
           // Seamlessly resume playback from this scrubbed beat!

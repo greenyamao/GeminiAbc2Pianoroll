@@ -53,6 +53,7 @@ class PianoRollSynth {
     // Transport & Playback state
     this.isPlaying = false;
     this.isPaused = false;
+    this.playOriginBeat = 0; // FL Studio-style playback start marker / origin
     this.notes = [];
     this.tempo = 120;
     this.loop = true; // Always loop on finish
@@ -451,6 +452,7 @@ class PianoRollSynth {
     this.loop = (loop !== undefined) ? loop : true;
     this.totalBeats = Math.max(totalBeats || 4, 1);
     this.currentBeat = startFromBeat;
+    this.playOriginBeat = startFromBeat;
 
     this.secondsPerBeat = 60 / this.tempo;
     this.totalDurationSec = this.totalBeats * this.secondsPerBeat;
@@ -481,6 +483,7 @@ class PianoRollSynth {
   async seek(targetBeat) {
     targetBeat = Math.max(0, Math.min(this.totalBeats, targetBeat));
     this.currentBeat = targetBeat;
+    this.playOriginBeat = targetBeat;
     this.stopAudioVoices();
 
     if (this.isPlaying && !this.isPaused) {
@@ -506,31 +509,34 @@ class PianoRollSynth {
     }
   }
 
-  pause() {
-    if (!this.isPlaying || this.isPaused) return;
-    this.isPaused = true;
-    this.pauseAudioOffset = this.ctx.currentTime - this.startAudioTime;
+  pause(returnToOrigin = true) {
+    if (!this.isPlaying && !this.isPaused) return;
+    this.isPlaying = false;
+    this.isPaused = false;
+    this.pauseAudioOffset = this.ctx ? (this.ctx.currentTime - this.startAudioTime) : 0;
 
     if (this.schedulerTimerId) {
       clearInterval(this.schedulerTimerId);
       this.schedulerTimerId = null;
     }
+    if (this.animFrameId) {
+      cancelAnimationFrame(this.animFrameId);
+      this.animFrameId = null;
+    }
     this.stopAudioVoices();
+    this.scheduledNoteKeys.clear();
+
+    if (returnToOrigin) {
+      this.currentBeat = this.playOriginBeat;
+      if (this.onProgress) {
+        this.onProgress(this.playOriginBeat, new Set());
+      }
+    }
   }
 
   async resume() {
-    if (!this.isPlaying || !this.isPaused) return;
     await this.ensureResumed();
-    this.isPaused = false;
-    this.startAudioTime = this.ctx.currentTime - this.pauseAudioOffset;
-
-    this.scheduledNoteKeys.clear();
-    this.runScheduler();
-
-    if (this.schedulerTimerId) clearInterval(this.schedulerTimerId);
-    this.schedulerTimerId = setInterval(() => this.runScheduler(), this.lookaheadMs);
-
-    this.startTracking();
+    return this.play(this.notes, this.tempo, this.loop, this.totalBeats, this.playOriginBeat);
   }
 
   /**
@@ -541,6 +547,7 @@ class PianoRollSynth {
     this.isPaused = false;
     this.pauseAudioOffset = 0;
     this.currentBeat = 0;
+    this.playOriginBeat = 0;
 
     if (this.schedulerTimerId) {
       clearInterval(this.schedulerTimerId);

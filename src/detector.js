@@ -332,7 +332,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
   synth.onEnded = () => {
     playBtn.innerHTML = '▶ Play';
     playBtn.classList.remove('is-playing');
-    pianoRoll.seekTo(0);
+    pianoRoll.seekTo(synth.playOriginBeat !== undefined ? synth.playOriginBeat : 0);
   };
 
   // Link Spacebar play/pause toggle
@@ -353,15 +353,11 @@ function createPianoRollWidget(abcString, originalHostElement) {
         }
       }
 
-      let startBeat = pianoRoll.currentBeat;
+      let startBeat = (synth.playOriginBeat !== undefined) ? synth.playOriginBeat : pianoRoll.currentBeat;
       if (startBeat >= (musicData.totalBeats - 0.05)) {
         startBeat = 0;
       }
       synth.play(musicData.notes, musicData.tempo, true, musicData.totalBeats, startBeat);
-      playBtn.innerHTML = '⏸ Pause';
-      playBtn.classList.add('is-playing');
-    } else if (synth.isPaused) {
-      synth.resume();
       playBtn.innerHTML = '⏸ Pause';
       playBtn.classList.add('is-playing');
     } else {
@@ -1127,7 +1123,7 @@ class NotebookLMComposer {
       this.synth.onEnded = () => {
         playBtn.innerHTML = '▶ Play';
         playBtn.classList.remove('is-playing');
-        this.pianoRoll.seekTo(0);
+        this.pianoRoll.seekTo(this.synth.playOriginBeat !== undefined ? this.synth.playOriginBeat : 0);
       };
 
       this.pianoRoll.togglePlay = () => {
@@ -1148,14 +1144,10 @@ class NotebookLMComposer {
           if (notes.length === 0) return;
           const tempo = this.pianoRoll.musicData.tempo || 120;
           const totalBeats = this.pianoRoll.musicData.totalBeats || 16;
-          let startBeat = this.pianoRoll.currentBeat;
+          let startBeat = (this.synth.playOriginBeat !== undefined) ? this.synth.playOriginBeat : this.pianoRoll.currentBeat;
           if (startBeat >= totalBeats - 0.05) startBeat = 0;
 
           this.synth.play(notes, tempo, true, totalBeats, startBeat);
-          playBtn.innerHTML = '⏸ Pause';
-          playBtn.classList.add('is-playing');
-        } else if (this.synth.isPaused) {
-          this.synth.resume();
           playBtn.innerHTML = '⏸ Pause';
           playBtn.classList.add('is-playing');
         } else {
