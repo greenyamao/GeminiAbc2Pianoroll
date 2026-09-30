@@ -106,16 +106,14 @@ function isAIStreaming() {
   const stopBtn = document.querySelector(
     // Gemini App & Spark
     'button[aria-label*="Stop response" i], ' +
-    'button[aria-label*="Остановить ответ" i], ' +
-    'button[aria-label*="Остановить" i], ' +
+    'button[aria-label*="Stop" i], ' +
     '[data-test-id="stop-button"], ' +
     '.sparkle-button.generating, ' +
     'mat-progress-bar, ' +
     // NotebookLM & general
-    'button[aria-label*="Stop" i], ' +
     'button[aria-label*="Cancel" i], ' +
     'button[title*="Stop" i], ' +
-    'button[title*="Остановить" i], ' +
+    'button[title*="Cancel" i], ' +
     '.stop-button, ' +
     '[data-streaming="true"], ' +
     '.streaming, ' +
@@ -1236,7 +1234,6 @@ function insertTextIntoNotebookLM(textToInsert) {
     // Enable Gemini send button
     const sendBtn = document.querySelector(
       'button[aria-label*="Send" i], ' +
-      'button[aria-label*="Отправить" i], ' +
       'button.send-button, ' +
       '[data-test-id="send-button"]'
     );

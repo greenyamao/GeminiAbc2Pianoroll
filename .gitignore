@@ -1,0 +1,13 @@
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Node / Dependencies
+node_modules/
+npm-debug.log*
+
+# Local test HTML dumps & assets
+*.html
+*_files/
