@@ -638,8 +638,36 @@ function createPianoRollWidget(abcString, originalHostElement) {
 }
 
 /**
- * Inspects a NotebookLM chat message and replaces ABC blocks in-place with Piano Roll widgets.
- * Fully supports live streaming updates so widgets continuously sync with streamed tokens.
+ * Checks whether an element is an entire message turn or high-level container
+ * that must NEVER be hidden with display: none.
+ */
+function isMessageWrapper(el) {
+  if (!el || el === document.body || el === document.documentElement) return true;
+  const tag = (el.tagName || '').toLowerCase();
+  if (['model-response', 'response-container', 'message-content', 'markdown',
+       'chat-message', 'conversation-turn', 'user-query', 'main', 'section', 'article'].includes(tag)) {
+    return true;
+  }
+  const cls = (typeof el.className === 'string') ? el.className.toLowerCase() : '';
+  if (cls.includes('message-content') || cls.includes('response-container') ||
+      cls.includes('model-response') || cls.includes('conversation-turn') ||
+      cls.includes('chat-message') || cls.includes('chat-turn') ||
+      cls.includes('markdown')) {
+    return true;
+  }
+  // Any container with multiple paragraphs or code blocks is a parent wrapper, not an individual block
+  try {
+    if (el.querySelectorAll('p, pre, code-block, blockquote').length > 1) {
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
+
+/**
+ * Inspects a chat message and replaces ABC blocks in-place with Piano Roll widgets.
+ * Strictly preserves all explanations, surrounding text, and multiple code snippets.
+ * Never sets display: none on message containers or parent response wrappers.
  * @param {HTMLElement} messageNode
  * @param {boolean} immediate - If true, mounts full widget immediately; if false, mounts lazy placeholder
  */
@@ -647,24 +675,28 @@ function processNotebookLMMessage(messageNode, immediate = true) {
   if (!messageNode) return;
 
   const fullText = messageNode.textContent || '';
-  const isStreaming = isNotebookLMStreaming();
+  const isStreaming = isAIStreaming();
   const unclosed = hasUnclosedFence(fullText);
 
   // Circuit breaker: only skip if message has already been finalized and is not streaming
   if (messageNode.dataset.flProcessed === 'true') return;
 
-  // 1. First: inspect all code blocks (<pre> elements)
-  const preElements = Array.from(messageNode.querySelectorAll('pre'));
-  for (const pre of preElements) {
-    if (pre.closest('.fl-widget-container, .fl-lazy-placeholder')) continue;
+  // 1. First: collect distinct code block containers (<code-block>, <pre>, .code-block, .snippet-container)
+  const rawCodeElements = Array.from(messageNode.querySelectorAll('code-block, pre, .code-block, .snippet-container'));
+  const codeContainers = [];
+  for (const el of rawCodeElements) {
+    if (el.closest('.fl-widget-container, .fl-lazy-placeholder')) continue;
+    const topContainer = el.closest('code-block, .code-block, .snippet-container') || el.closest('pre') || el;
+    if (topContainer && !isMessageWrapper(topContainer) && !codeContainers.includes(topContainer)) {
+      codeContainers.push(topContainer);
+    }
+  }
 
-    const preText = pre.textContent || '';
-    if (hasMusicContent(preText)) {
-      const abcMatch = extractABC(preText);
+  for (const container of codeContainers) {
+    const codeText = container.textContent || '';
+    if (hasMusicContent(codeText)) {
+      const abcMatch = extractABC(codeText);
       if (abcMatch) {
-        // Enclosing code block container (supports Gemini's <code-block> element and NotebookLM's .code-block / pre)
-        const container = pre.closest('code-block, .code-block, .snippet-container, pre') || pre;
-
         // If widget already attached to this container, update its notes in real-time as tokens stream
         if (container._flWidget && typeof container._flWidget.updateData === 'function') {
           if (container.dataset.flLastAbc !== abcMatch.abcString) {
@@ -674,90 +706,72 @@ function processNotebookLMMessage(messageNode, immediate = true) {
           continue;
         }
 
-        if (pre.dataset.flAttached === 'true') continue;
+        if (container.dataset.flAttached === 'true') continue;
 
         const elem = immediate
           ? createPianoRollWidget(abcMatch.abcString, container)
           : createLazyPlaceholder(abcMatch.abcString, container);
 
-        if (elem) {
-          pre.dataset.flAttached = 'true';
+        if (elem && container.parentElement) {
           container.dataset.flAttached = 'true';
           container._flWidget = elem;
           container.dataset.flLastAbc = abcMatch.abcString;
-          container.style.display = 'none'; // Hide the ABC code block cleanly
-          // Insert the Piano Roll widget in-place directly where the ABC code was!
+          container.style.display = 'none'; // Safely hide ONLY the individual code block
           container.parentElement.insertBefore(elem, container);
         }
       }
     }
   }
 
-  // 2. Second: inspect all text blocks across the message
-  if (hasMusicContent(fullText)) {
+  // 2. Second: inspect individual leaf paragraphs for unformatted ABC text (outside code blocks)
+  const leafParagraphs = Array.from(messageNode.querySelectorAll('p, paragraph-element-view, .paragraph, blockquote'));
+  for (const p of leafParagraphs) {
+    if (p.closest('.fl-widget-container, .fl-lazy-placeholder')) continue;
+    if (p.dataset.flAttached === 'true') continue;
+    if (p.querySelector('.fl-widget-container, .fl-lazy-placeholder')) continue;
+    if (isMessageWrapper(p)) continue;
+
+    const pText = p.textContent || '';
+    if (hasMusicContent(pText)) {
+      const abcMatch = extractABC(pText);
+      if (abcMatch) {
+        if (p._flWidget && typeof p._flWidget.updateData === 'function') {
+          if (p.dataset.flLastAbc !== abcMatch.abcString) {
+            p._flWidget.updateData(abcMatch.abcString);
+            p.dataset.flLastAbc = abcMatch.abcString;
+          }
+          continue;
+        }
+
+        const elem = immediate
+          ? createPianoRollWidget(abcMatch.abcString, p)
+          : createLazyPlaceholder(abcMatch.abcString, p);
+
+        if (elem && p.parentElement) {
+          p.dataset.flAttached = 'true';
+          p._flWidget = elem;
+          p.dataset.flLastAbc = abcMatch.abcString;
+          p.style.display = 'none'; // Only hide this single paragraph
+          p.parentElement.insertBefore(elem, p);
+        }
+      }
+    }
+  }
+
+  // 3. Fallback: if message has NO child paragraphs or code blocks at all (monolithic text node)
+  if (codeContainers.length === 0 && leafParagraphs.length === 0 && hasMusicContent(fullText)) {
     const allFound = extractAllABC(fullText);
     for (const item of allFound) {
       const snippetId = item.abcString.slice(0, 40).replace(/\s+/g, '_');
-      if (messageNode.querySelector(`[data-abc-snippet="${snippetId}"]`)) {
-        continue;
-      }
-
-      // Find candidate elements in messageNode
-      const candidates = Array.from(messageNode.querySelectorAll('code-block, p, div, paragraph-element-view, [class*="paragraph"], message-content, markdown'));
-      const firstLine = item.abcString.split('\n')[0].trim();
-      let targetEl = null;
-
-      for (const el of candidates) {
-        if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) continue;
-        if (el.textContent && el.textContent.includes(firstLine)) {
-          targetEl = el;
-          break;
-        }
-      }
-
-      // Fallback: look for music line with barline
-      if (!targetEl) {
-        const musicLine = item.abcString.split('\n').find(l => l.includes('|') && /[A-Ga-g]/.test(l));
-        if (musicLine) {
-          for (const el of candidates) {
-            if (el.closest('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) continue;
-            if (el.textContent && el.textContent.includes(musicLine.trim())) {
-              targetEl = el;
-              break;
-            }
-          }
-        }
-      }
-
-      if (!targetEl) {
-        targetEl = messageNode.querySelector('.message-text-content, .message-content, message-content, markdown') || messageNode;
-      }
-
-      const hostContainer = targetEl.closest('code-block, .paragraph, [class*="paragraph"], p, pre, .code-block, paragraph-element-view') || targetEl;
-
-      // If widget already attached, update its notes in real-time
-      if (hostContainer._flWidget && typeof hostContainer._flWidget.updateData === 'function') {
-        if (hostContainer.dataset.flLastAbc !== item.abcString) {
-          hostContainer._flWidget.updateData(item.abcString);
-          hostContainer.dataset.flLastAbc = item.abcString;
-        }
-        continue;
-      }
+      if (messageNode.querySelector(`[data-abc-snippet="${snippetId}"]`)) continue;
 
       const elem = immediate
-        ? createPianoRollWidget(item.abcString, hostContainer)
-        : createLazyPlaceholder(item.abcString, hostContainer);
+        ? createPianoRollWidget(item.abcString, messageNode)
+        : createLazyPlaceholder(item.abcString, messageNode);
 
       if (elem) {
-        hostContainer._flWidget = elem;
-        hostContainer.dataset.flLastAbc = item.abcString;
-        if (hostContainer !== messageNode && hostContainer.parentElement) {
-          hostContainer.style.display = 'none';
-          hostContainer.parentElement.insertBefore(elem, hostContainer);
-        } else {
-          targetEl.style.display = 'none';
-          targetEl.parentElement.insertBefore(elem, targetEl);
-        }
+        // DO NOT hide messageNode! Simply append the widget so user text is never lost
+        messageNode.appendChild(elem);
       }
     }
   }
@@ -1309,14 +1323,12 @@ class NotebookLMComposer {
       const modalWindow = document.createElement('div');
       modalWindow.className = 'fl-composer-modal-window';
 
-      // Header with Title, Page Type Badge, and Close button
+      // Header with Title and Close button (Minimalist FL Studio style)
       const modalHeader = document.createElement('div');
       modalHeader.className = 'fl-modal-header';
       modalHeader.innerHTML = `
         <div class="fl-modal-title-group">
-          <span class="fl-modal-title">🎹 FL Studio Piano Roll</span>
-          <span class="fl-page-badge fl-page-${pageType}">${pageType.toUpperCase()}</span>
-          <span class="fl-modal-subtitle">Left click: draw / move | Right edge: resize | 🧲 Snap</span>
+          <span class="fl-modal-title">🎹 Piano Roll</span>
         </div>
         <button type="button" class="fl-modal-close-btn" title="Close (Esc)">✕</button>
       `;
@@ -1528,10 +1540,10 @@ class NotebookLMComposer {
       const modalFooter = document.createElement('div');
       modalFooter.className = 'fl-modal-footer';
       modalFooter.innerHTML = `
-        <div class="fl-modal-footer-info">FL Studio Engine • Strict Quantization</div>
+        <div></div>
         <div class="fl-modal-footer-actions">
-          <button type="button" class="fl-btn-modal-cancel">✕ Cancel</button>
-          <button type="button" class="fl-btn-modal-apply">✔ Apply & Insert to Chat</button>
+          <button type="button" class="fl-btn-modal-cancel">Cancel</button>
+          <button type="button" class="fl-btn-modal-apply">Apply</button>
         </div>
       `;
 
@@ -1852,6 +1864,9 @@ class NotebookLMWatcher {
         '.message-container'
       ];
       let messageNodes = Array.from(document.querySelectorAll(candidateSelectors.join(', ')));
+
+      // Keep only outermost distinct message turn containers (never process nested children as separate messages)
+      messageNodes = messageNodes.filter(node => !messageNodes.some(other => other !== node && other.contains(node)));
 
       // Also discover any other turn or message containers containing unprocessed ABC music
       const allDivs = document.querySelectorAll('div, section, article');
