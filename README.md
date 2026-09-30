@@ -2,6 +2,10 @@
 
 Browser extension for Google Gemini and NotebookLM that renders ABC music notation as an interactive piano roll.
 
+![Music in Chat](img/chat.png)
+
+![Composer Editor](img/user_pianoroll.png)
+
 Gemini generates musical ideas as text in ABC notation. This extension parses those notes into a visual piano roll, plays them with an acoustic piano soundfont, and provides an editor to draw or import notes and send them back to the chat.
 
 ## Features
@@ -10,14 +14,6 @@ Gemini generates musical ideas as text in ABC notation. This extension parses th
 - Visual piano roll: view note pitches, durations, and chords on a grid.
 - Note editor: draw melodies, chords, or edit existing patterns.
 - MIDI import/export: load .mid files into the editor or download generated patterns as MIDI.
-
-## Screenshots
-
-### Chat Widget
-![Music in Chat](img/chat.png)
-
-### Editor
-![Composer Editor](img/user_pianoroll.png)
 
 ## Supported Sites
 
