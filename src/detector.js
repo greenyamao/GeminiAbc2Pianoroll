@@ -679,37 +679,53 @@ function processNotebookLMMessage(messageNode, immediate = true) {
 }
 
 /**
- * Converts note array into standard ABC notation
+ * Converts note array into standard ABC notation with measure-aware accidentals.
+ * In ABC standard, accidentals persist until the end of the measure for that letter.
+ * If a note in the same measure is natural after a sharp/flat, it MUST explicitly be preceded by '='.
  */
-function midiToABCPitch(midiPitch) {
+function midiToABCPitch(midiPitch, measureAccs = {}) {
   const PITCH_MAP = [
-    { name: 'C', acc: '' },
-    { name: 'C', acc: '^' },
-    { name: 'D', acc: '' },
-    { name: 'D', acc: '^' },
-    { name: 'E', acc: '' },
-    { name: 'F', acc: '' },
-    { name: 'F', acc: '^' },
-    { name: 'G', acc: '' },
-    { name: 'G', acc: '^' },
-    { name: 'A', acc: '' },
-    { name: 'A', acc: '^' },
-    { name: 'B', acc: '' }
+    { name: 'C', acc: 0 },
+    { name: 'C', acc: 1 },
+    { name: 'D', acc: 0 },
+    { name: 'D', acc: 1 },
+    { name: 'E', acc: 0 },
+    { name: 'F', acc: 0 },
+    { name: 'F', acc: 1 },
+    { name: 'G', acc: 0 },
+    { name: 'G', acc: 1 },
+    { name: 'A', acc: 0 },
+    { name: 'A', acc: 1 },
+    { name: 'B', acc: 0 }
   ];
 
   const octave = Math.floor(midiPitch / 12) - 1;
   const semitone = ((midiPitch % 12) + 12) % 12;
   const p = PITCH_MAP[semitone];
+  const baseLetter = p.name;
 
-  let noteStr = '';
+  let prefix = '';
+  const currentAlter = (measureAccs[baseLetter] !== undefined) ? measureAccs[baseLetter] : 0;
+
+  if (p.acc === 1) {
+    prefix = '^';
+    measureAccs[baseLetter] = 1;
+  } else {
+    if (currentAlter !== 0) {
+      prefix = '=';
+      measureAccs[baseLetter] = 0;
+    }
+  }
+
+  let noteStr = prefix;
   if (octave >= 5) {
-    noteStr = p.acc + p.name.toLowerCase();
+    noteStr += p.name.toLowerCase();
     const ticks = octave - 5;
     if (ticks > 0) noteStr += "'".repeat(ticks);
   } else if (octave === 4) {
-    noteStr = p.acc + p.name;
+    noteStr += p.name;
   } else {
-    noteStr = p.acc + p.name;
+    noteStr += p.name;
     const commas = 4 - octave;
     noteStr += ",".repeat(commas);
   }
@@ -815,6 +831,7 @@ function formatSingleVoiceABC(notes, totalBeats, beatsPerMeasure) {
     const measureStart = m * beatsPerMeasure;
     const measureEnd = (m + 1) * beatsPerMeasure;
     let curBeat = measureStart;
+    const measureAccs = {}; // Reset accidentals per measure!
 
     const measureGroups = groups.filter(g => g.startBeat >= measureStart - 0.01 && g.startBeat < measureEnd - 0.01);
 
@@ -827,9 +844,9 @@ function formatSingleVoiceABC(notes, totalBeats, beatsPerMeasure) {
 
       const tieSuffix = g.hasTie ? '-' : '';
       if (g.pitches.length === 1) {
-        body += midiToABCPitch(g.pitches[0]) + formatABCDuration(g.duration) + tieSuffix + ' ';
+        body += midiToABCPitch(g.pitches[0], measureAccs) + formatABCDuration(g.duration) + tieSuffix + ' ';
       } else {
-        const notesStr = g.pitches.map(midiToABCPitch).join('');
+        const notesStr = g.pitches.map(p => midiToABCPitch(p, measureAccs)).join('');
         body += `[${notesStr}]${formatABCDuration(g.duration)}${tieSuffix} `;
       }
       curBeat = quantize(curBeat + g.duration, 0.25);
