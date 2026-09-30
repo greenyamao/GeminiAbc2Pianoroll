@@ -192,7 +192,11 @@ class FLPianoRoll {
     this.canvas.className = 'fl-pianoroll-canvas';
     this.canvas.style.display = 'block';
     this.canvas.style.width = '100%';
-    this.canvas.style.height = `${this.options.height}px`;
+    if (this.options.fitContainer) {
+      this.canvas.style.height = '100%';
+    } else {
+      this.canvas.style.height = `${this.options.height}px`;
+    }
     this.canvas.style.cursor = 'default';
 
     this.canvas.addEventListener('mouseenter', () => {
@@ -212,6 +216,9 @@ class FLPianoRoll {
         this.render();
       });
       this.resizeObserver.observe(this.canvas);
+      if (this.container) {
+        this.resizeObserver.observe(this.container);
+      }
     }
   }
 
@@ -219,9 +226,10 @@ class FLPianoRoll {
     const rect = this.canvas.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     this.width = rect.width || this.container.clientWidth || 600;
-    this.height = (this.container.clientHeight && this.container.clientHeight > 100) 
-      ? this.container.clientHeight 
-      : this.options.height;
+    const containerH = (this.container && this.container.clientHeight) ? this.container.clientHeight : 0;
+    this.height = (this.options.fitContainer && containerH > 100)
+      ? containerH
+      : ((containerH > 100) ? containerH : (rect.height || this.options.height));
 
     this.canvas.width = Math.round(this.width * dpr);
     this.canvas.height = Math.round(this.height * dpr);

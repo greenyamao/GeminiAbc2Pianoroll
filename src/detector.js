@@ -1177,6 +1177,53 @@ class NotebookLMComposer {
       clearBtn.innerHTML = '🗑 Clear';
       clearBtn.title = 'Clear piano roll notes';
 
+      const loadMidiBtn = document.createElement('button');
+      loadMidiBtn.className = 'fl-btn fl-btn-load-midi';
+      loadMidiBtn.type = 'button';
+      loadMidiBtn.innerHTML = '📁 Load MIDI';
+      loadMidiBtn.title = 'Import standard MIDI file (.mid, .midi) with strict musical quantization';
+
+      const midiFileInput = document.createElement('input');
+      midiFileInput.type = 'file';
+      midiFileInput.accept = '.mid,.midi,audio/midi';
+      midiFileInput.style.display = 'none';
+
+      loadMidiBtn.onclick = () => {
+        midiFileInput.click();
+      };
+
+      midiFileInput.onchange = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          try {
+            const buffer = ev.target.result;
+            const quantStep = (this.pianoRoll && this.pianoRoll.snapStep) ? this.pianoRoll.snapStep : 0.25;
+            const parsedData = (typeof MIDIParser !== 'undefined' && MIDIParser.parse)
+              ? MIDIParser.parse(buffer, { quantizeStep: quantStep })
+              : (typeof parseMIDI === 'function' ? parseMIDI(buffer, { quantizeStep: quantStep }) : null);
+
+            if (!parsedData || !parsedData.notes || parsedData.notes.length === 0) {
+              alert('No musical notes found in this MIDI file.');
+              return;
+            }
+
+            this.loadScore(parsedData);
+
+            const oldHtml = loadMidiBtn.innerHTML;
+            loadMidiBtn.innerHTML = '✔ Loaded!';
+            setTimeout(() => { loadMidiBtn.innerHTML = oldHtml; }, 1500);
+          } catch (err) {
+            console.error('MIDI parse error:', err);
+            alert('Failed to parse MIDI file: ' + (err.message || err));
+          }
+        };
+        reader.readAsArrayBuffer(file);
+        e.target.value = '';
+      };
+
       const lcd = document.createElement('div');
       lcd.className = 'fl-lcd';
       lcd.innerHTML = `
@@ -1188,11 +1235,16 @@ class NotebookLMComposer {
         <span class="fl-lcd-sep"></span>
         <span class="fl-lcd-notes" style="color:#a5b4fc;">0 notes</span>
       `;
+      this.lcdKey = lcd.querySelector('.fl-lcd-key');
+      this.lcdMeter = lcd.querySelector('.fl-lcd-meter');
+      this.lcdBpm = lcd.querySelector('.fl-lcd-bpm');
       this.lcdNotes = lcd.querySelector('.fl-lcd-notes');
 
       leftGroup.appendChild(playBtn);
       leftGroup.appendChild(stopBtn);
       leftGroup.appendChild(clearBtn);
+      leftGroup.appendChild(loadMidiBtn);
+      leftGroup.appendChild(midiFileInput);
       leftGroup.appendChild(lcd);
 
       // Right section: Snap + Expression + Volume
@@ -1267,11 +1319,12 @@ class NotebookLMComposer {
       toolbar.appendChild(rightGroup);
 
       const canvasWrap = document.createElement('div');
-      canvasWrap.className = 'fl-canvas-wrap';
-      canvasWrap.style.flex = '1';
+      canvasWrap.className = 'fl-canvas-wrap fl-composer-canvas-wrap';
+      canvasWrap.style.flex = '1 1 auto';
       canvasWrap.style.height = '100%';
-      canvasWrap.style.minHeight = '360px';
+      canvasWrap.style.minHeight = '0';
       canvasWrap.style.position = 'relative';
+      canvasWrap.style.overflow = 'hidden';
 
       // Modal Footer with Cancel & Apply buttons
       const modalFooter = document.createElement('div');
@@ -1296,8 +1349,8 @@ class NotebookLMComposer {
         }
         const abc = notesToABC(notes, {
           tempo: this.pianoRoll.musicData?.tempo || 120,
-          key: 'C',
-          meter: '4/4'
+          key: this.pianoRoll.musicData?.key || 'C',
+          meter: this.pianoRoll.musicData?.meter || '4/4'
         });
         const markdown = '```abc\n' + abc.trim() + '\n```';
         insertTextIntoNotebookLM(markdown);
@@ -1331,6 +1384,7 @@ class NotebookLMComposer {
 
       this.pianoRoll = new FLPianoRoll(canvasWrap, {
         height: 400,
+        fitContainer: true,
         editable: true,
         synth: this.synth,
         onNotesChange: (notes) => {
@@ -1473,6 +1527,15 @@ class NotebookLMComposer {
       if (this.lcdNotes) {
         const count = clonedNotes.length;
         this.lcdNotes.textContent = `${count} note${count === 1 ? '' : 's'}`;
+      }
+      if (this.lcdKey && clonedData.key) {
+        this.lcdKey.textContent = clonedData.key;
+      }
+      if (this.lcdMeter && clonedData.meter) {
+        this.lcdMeter.textContent = clonedData.meter;
+      }
+      if (this.lcdBpm && clonedData.tempo) {
+        this.lcdBpm.innerHTML = `${clonedData.tempo}<small>BPM</small>`;
       }
     }
 

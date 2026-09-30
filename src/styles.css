@@ -440,6 +440,25 @@
   color: var(--fl-text-main, #d1d5db);
 }
 
+.fl-composer-modal-window .fl-canvas-wrap {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+  background: #1a242c;
+}
+
+.fl-composer-modal-window .fl-canvas-wrap canvas.fl-pianoroll-canvas {
+  flex: 1 1 auto;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  display: block;
+}
+
 .fl-modal-header {
   display: flex;
   align-items: center;
@@ -611,6 +630,21 @@
   background: #3b1818 !important;
   border-color: #ef4444 !important;
   color: #fca5a5 !important;
+}
+
+/* Load MIDI button */
+.fl-btn-load-midi {
+  background: #172535 !important;
+  border-color: #2b3e55 !important;
+  color: #7dd3fc !important;
+  font-weight: 600 !important;
+}
+
+.fl-btn-load-midi:hover {
+  background: #1e3650 !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3) !important;
 }
 
 

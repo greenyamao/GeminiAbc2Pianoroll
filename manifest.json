@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NotebookLM ABC Piano Roll",
-  "version": "1.1.4",
+  "version": "1.1.5",
   "description": "FL Studio-style Piano Roll and synthesizer for ABC notation in Google NotebookLM",
   "content_scripts": [
     {
@@ -12,6 +12,7 @@
       "js": [
         "src/smplr.js",
         "src/abc-parser.js",
+        "src/midi-parser.js",
         "src/synth.js",
         "src/pianoroll.js",
         "src/detector.js",
