@@ -39,13 +39,80 @@ function getLazyObserver() {
 }
 
 /**
- * Checks whether an AI streaming generation is currently active in the page
+ * Detects and explicitly distinguishes the 3 supported page types:
+ * - 'notebook': Google NotebookLM (notebooklm.google.com / notebook.google.com)
+ * - 'spark': Google Gemini Spark (gemini.google.com/spark)
+ * - 'app': Google Gemini App (gemini.google.com/app or standard Gemini chat)
+ * @returns {'notebook'|'spark'|'app'}
  */
-function isNotebookLMStreaming() {
+function getPageType() {
+  try {
+    const host = (typeof window !== 'undefined' && window.location && window.location.hostname) || '';
+    const path = (typeof window !== 'undefined' && window.location && window.location.pathname) || '';
+    const href = (typeof window !== 'undefined' && window.location && window.location.href) || '';
+    const title = (typeof document !== 'undefined' && document.title) || '';
+
+    // 1. Google NotebookLM
+    if (host.includes('notebooklm.google.com') || host.includes('notebook.google.com') || href.includes('notebooklm')) {
+      return 'notebook';
+    }
+
+    // 2. Google Gemini Spark
+    if (host.includes('gemini.google.com')) {
+      if (path.startsWith('/spark') || href.includes('/spark') || title.toLowerCase().includes('spark')) {
+        return 'spark';
+      }
+      if (typeof document !== 'undefined' && typeof document.querySelector === 'function') {
+        if (document.querySelector('a[href*="/spark/"]') || document.querySelector('[data-test-id*="spark"]')) {
+          return 'spark';
+        }
+      }
+      return 'app';
+    }
+
+    // DOM fallbacks if host is localhost or testing environment
+    if (typeof document !== 'undefined' && typeof document.querySelector === 'function') {
+      if (document.querySelector('notebook-app, query-box, textarea.query-box-input')) {
+        return 'notebook';
+      }
+      if (document.querySelector('a[href*="/spark/"]')) {
+        return 'spark';
+      }
+      if (document.querySelector('model-response, rich-textarea, .ql-editor')) {
+        return 'app';
+      }
+    }
+  } catch (e) {
+    console.warn('getPageType error:', e);
+  }
+  return 'notebook';
+}
+
+function syncPageTypeAttribute() {
+  if (typeof document !== 'undefined' && document.documentElement) {
+    const pt = getPageType();
+    document.documentElement.dataset.abcPageType = pt;
+  }
+}
+
+// Sync attribute immediately on script load
+syncPageTypeAttribute();
+
+/**
+ * Checks whether an AI streaming generation is currently active across NotebookLM, Gemini App, or Gemini Spark
+ */
+function isAIStreaming() {
   if (typeof document === 'undefined') return false;
   const stopBtn = document.querySelector(
-    'button[aria-label*="Stop" i], ' +
+    // Gemini App & Spark
+    'button[aria-label*="Stop response" i], ' +
+    'button[aria-label*="Остановить ответ" i], ' +
     'button[aria-label*="Остановить" i], ' +
+    '[data-test-id="stop-button"], ' +
+    '.sparkle-button.generating, ' +
+    'mat-progress-bar, ' +
+    // NotebookLM & general
+    'button[aria-label*="Stop" i], ' +
     'button[aria-label*="Cancel" i], ' +
     'button[title*="Stop" i], ' +
     'button[title*="Остановить" i], ' +
@@ -56,6 +123,8 @@ function isNotebookLMStreaming() {
   );
   return !!stopBtn;
 }
+
+const isNotebookLMStreaming = isAIStreaming;
 
 /**
  * Checks whether text contains an unclosed markdown code fence (``` or ~~~)
@@ -593,7 +662,8 @@ function processNotebookLMMessage(messageNode, immediate = true) {
     if (hasMusicContent(preText)) {
       const abcMatch = extractABC(preText);
       if (abcMatch) {
-        const container = pre.closest('.code-block, .snippet-container, pre') || pre;
+        // Enclosing code block container (supports Gemini's <code-block> element and NotebookLM's .code-block / pre)
+        const container = pre.closest('code-block, .code-block, .snippet-container, pre') || pre;
 
         // If widget already attached to this container, update its notes in real-time as tokens stream
         if (container._flWidget && typeof container._flWidget.updateData === 'function') {
@@ -633,7 +703,7 @@ function processNotebookLMMessage(messageNode, immediate = true) {
       }
 
       // Find candidate elements in messageNode
-      const candidates = Array.from(messageNode.querySelectorAll('p, div, paragraph-element-view, [class*="paragraph"]'));
+      const candidates = Array.from(messageNode.querySelectorAll('code-block, p, div, paragraph-element-view, [class*="paragraph"], message-content, markdown'));
       const firstLine = item.abcString.split('\n')[0].trim();
       let targetEl = null;
 
@@ -660,10 +730,10 @@ function processNotebookLMMessage(messageNode, immediate = true) {
       }
 
       if (!targetEl) {
-        targetEl = messageNode.querySelector('.message-text-content, .message-content') || messageNode;
+        targetEl = messageNode.querySelector('.message-text-content, .message-content, message-content, markdown') || messageNode;
       }
 
-      const hostContainer = targetEl.closest('.paragraph, [class*="paragraph"], p, pre, .code-block, paragraph-element-view') || targetEl;
+      const hostContainer = targetEl.closest('code-block, .paragraph, [class*="paragraph"], p, pre, .code-block, paragraph-element-view') || targetEl;
 
       // If widget already attached, update its notes in real-time
       if (hostContainer._flWidget && typeof hostContainer._flWidget.updateData === 'function') {
@@ -981,9 +1051,18 @@ function notesToABC(notes, options = {}) {
 }
 
 /**
- * Finds the exact NotebookLM query textarea from user's DOM
+ * Finds the active prompt input element (Quill editor in Gemini App/Spark or textarea in NotebookLM)
  */
-function findNotebookLMTextarea() {
+function findActiveInput() {
+  // Check Gemini Quill editor
+  const ql = document.querySelector(
+    '.ql-editor[contenteditable="true"], ' +
+    'rich-textarea [contenteditable="true"], ' +
+    'div[role="textbox"][contenteditable="true"]'
+  );
+  if (ql) return ql;
+
+  // Check NotebookLM / standard textarea
   return (
     document.querySelector('textarea.query-box-input') ||
     document.querySelector('textarea[aria-label="Query box"]') ||
@@ -995,19 +1074,41 @@ function findNotebookLMTextarea() {
   );
 }
 
+const findNotebookLMTextarea = findActiveInput;
+
 /**
- * Finds NotebookLM input prompt container
+ * Finds the prompt input container across NotebookLM, Gemini App, and Gemini Spark
  */
-function findNotebookLMInputContainer() {
-  const textarea = findNotebookLMTextarea();
-  if (textarea) {
-    const form = textarea.closest('form.form, form, .message-container, query-box, .query-box');
+function findActiveInputContainer() {
+  const pageType = getPageType();
+
+  // If Gemini App or Spark
+  if (pageType === 'app' || pageType === 'spark') {
+    const geminiLeading = document.querySelector('.leading-actions-wrapper');
+    if (geminiLeading) return geminiLeading;
+    const geminiInput = document.querySelector(
+      '.text-input-field, ' +
+      '.trailing-actions-wrapper, ' +
+      '.input-area, ' +
+      'rich-textarea, ' +
+      '.input-box-container'
+    );
+    if (geminiInput) return geminiInput;
+  }
+
+  // NotebookLM or generic
+  const input = findActiveInput();
+  if (input) {
+    const form = input.closest('form.form, form, .message-container, query-box, .query-box, .text-input-field');
     if (form) return form;
   }
 
   const selectors = [
     'form.form:has(textarea.query-box-input)',
     'form:has(.query-box-input)',
+    '.leading-actions-wrapper',
+    '.text-input-field',
+    '.input-area',
     '.message-container',
     '.query-box-input-wrapper',
     'query-box',
@@ -1024,11 +1125,13 @@ function findNotebookLMInputContainer() {
   return null;
 }
 
+const findNotebookLMInputContainer = findActiveInputContainer;
+
 /**
- * Bulletproof prompt text inserter supporting textarea and contenteditable
+ * Bulletproof prompt text inserter supporting both NotebookLM (textarea) and Gemini App/Spark (Quill contenteditable)
  */
 function insertTextIntoNotebookLM(textToInsert) {
-  const input = findNotebookLMTextarea();
+  const input = findActiveInput();
   if (!input) {
     if (navigator.clipboard) navigator.clipboard.writeText(textToInsert);
     return false;
@@ -1085,20 +1188,49 @@ function insertTextIntoNotebookLM(textToInsert) {
         nbBtn.classList.remove('nb-button-disabled');
       }
     }
-  } else if (input.isContentEditable) {
-    const sel = window.getSelection();
-    if (sel && sel.rangeCount > 0) {
-      const range = sel.getRangeAt(0);
-      range.deleteContents();
-      const node = document.createTextNode(textToInsert + '\n');
-      range.insertNode(node);
-      range.collapse(false);
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } else {
-      input.textContent += '\n' + textToInsert + '\n';
+  } else if (input.isContentEditable || input.getAttribute('contenteditable') === 'true') {
+    // Gemini App & Spark: Quill editor (.ql-editor) inside <rich-textarea>
+    if (input.classList.contains('ql-blank') || input.innerHTML.trim() === '<p><br></p>') {
+      input.innerHTML = '';
+      input.classList.remove('ql-blank');
     }
-    input.dispatchEvent(new Event('input', { bubbles: true }));
+
+    const lines = textToInsert.split(/\r?\n/);
+    const frag = document.createDocumentFragment();
+    for (const line of lines) {
+      const p = document.createElement('p');
+      if (line.length === 0) {
+        p.appendChild(document.createElement('br'));
+      } else {
+        p.textContent = line;
+      }
+      frag.appendChild(p);
+    }
+    input.appendChild(frag);
+
+    input.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true, cancelable: true }));
+    try {
+      input.dispatchEvent(new InputEvent('input', {
+        bubbles: true,
+        cancelable: true,
+        inputType: 'insertText',
+        data: textToInsert
+      }));
+    } catch (e) {}
+
+    // Enable Gemini send button
+    const sendBtn = document.querySelector(
+      'button[aria-label*="Send" i], ' +
+      'button[aria-label*="Отправить" i], ' +
+      'button.send-button, ' +
+      '[data-test-id="send-button"]'
+    );
+    if (sendBtn) {
+      sendBtn.disabled = false;
+      sendBtn.removeAttribute('disabled');
+      sendBtn.classList.remove('mat-mdc-button-disabled');
+    }
   }
 
   return true;
@@ -1123,13 +1255,15 @@ class NotebookLMComposer {
     }
     this.currentContainer = inputContainer;
 
+    const pageType = getPageType();
+
     // 1. Create or attach the Toggle Button in the input bar
     if (!this.toggleBtn) {
       this.toggleBtn = document.createElement('button');
       this.toggleBtn.className = 'fl-input-composer-btn';
       this.toggleBtn.type = 'button';
       this.toggleBtn.innerHTML = '🎹 Piano Roll';
-      this.toggleBtn.title = 'Open interactive FL Studio Piano Roll composer';
+      this.toggleBtn.title = `Open interactive FL Studio Piano Roll composer [${pageType.toUpperCase()}]`;
       this.toggleBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1137,19 +1271,32 @@ class NotebookLMComposer {
       };
     }
 
-    // Place toggleBtn in .bottom-right-container or input bar
-    const bottomRight = inputContainer.querySelector('.bottom-right-container');
-    if (bottomRight) {
-      const selectedNum = bottomRight.querySelector('.selected-num-container');
-      if (selectedNum && !bottomRight.contains(this.toggleBtn)) {
-        bottomRight.insertBefore(this.toggleBtn, selectedNum);
-      } else if (!bottomRight.contains(this.toggleBtn)) {
-        bottomRight.prepend(this.toggleBtn);
+    // Place toggleBtn based on pageType (Gemini App/Spark vs NotebookLM)
+    if (pageType === 'app' || pageType === 'spark') {
+      const leadingWrapper = document.querySelector('.leading-actions-wrapper') || inputContainer.querySelector?.('.leading-actions-wrapper');
+      const trailingWrapper = document.querySelector('.trailing-actions-wrapper') || inputContainer.querySelector?.('.trailing-actions-wrapper');
+      if (leadingWrapper && !leadingWrapper.contains(this.toggleBtn)) {
+        leadingWrapper.appendChild(this.toggleBtn);
+      } else if (trailingWrapper && !trailingWrapper.contains(this.toggleBtn)) {
+        trailingWrapper.insertBefore(this.toggleBtn, trailingWrapper.firstChild);
+      } else if (!inputContainer.contains(this.toggleBtn)) {
+        inputContainer.appendChild(this.toggleBtn);
       }
     } else {
-      const btnRow = inputContainer.querySelector('.buttons, .actions, .controls, .bottom-row, .leading-actions') || inputContainer;
-      if (!btnRow.contains(this.toggleBtn)) {
-        btnRow.appendChild(this.toggleBtn);
+      // NotebookLM
+      const bottomRight = inputContainer.querySelector?.('.bottom-right-container');
+      if (bottomRight) {
+        const selectedNum = bottomRight.querySelector('.selected-num-container');
+        if (selectedNum && !bottomRight.contains(this.toggleBtn)) {
+          bottomRight.insertBefore(this.toggleBtn, selectedNum);
+        } else if (!bottomRight.contains(this.toggleBtn)) {
+          bottomRight.prepend(this.toggleBtn);
+        }
+      } else {
+        const btnRow = inputContainer.querySelector?.('.buttons, .actions, .controls, .bottom-row, .leading-actions') || inputContainer;
+        if (!btnRow.contains(this.toggleBtn)) {
+          btnRow.appendChild(this.toggleBtn);
+        }
       }
     }
 
@@ -1162,12 +1309,13 @@ class NotebookLMComposer {
       const modalWindow = document.createElement('div');
       modalWindow.className = 'fl-composer-modal-window';
 
-      // Header with Title and Close button
+      // Header with Title, Page Type Badge, and Close button
       const modalHeader = document.createElement('div');
       modalHeader.className = 'fl-modal-header';
       modalHeader.innerHTML = `
         <div class="fl-modal-title-group">
           <span class="fl-modal-title">🎹 FL Studio Piano Roll</span>
+          <span class="fl-page-badge fl-page-${pageType}">${pageType.toUpperCase()}</span>
           <span class="fl-modal-subtitle">Left click: draw / move | Right edge: resize | 🧲 Snap</span>
         </div>
         <button type="button" class="fl-modal-close-btn" title="Close (Esc)">✕</button>
@@ -1689,11 +1837,15 @@ class NotebookLMWatcher {
       this.initComposer();
 
       const candidateSelectors = [
+        'model-response',
+        '.model-response',
+        'response-container',
+        '.response-container',
+        'message-content',
+        '.message-content',
         'chat-message',
         '.chat-message',
         '.to-user-container',
-        'model-response',
-        '.model-response',
         'conversation-turn',
         '.conversation-turn',
         '.chat-turn',
@@ -1722,7 +1874,7 @@ class NotebookLMWatcher {
       const candidateMessages = [];
       for (const msg of messageNodes) {
         if (msg.dataset.flProcessed === 'true') continue;
-        const isMsgStreaming = isNotebookLMStreaming() || hasUnclosedFence(msg.textContent || '');
+        const isMsgStreaming = isAIStreaming() || hasUnclosedFence(msg.textContent || '');
         if (!isMsgStreaming && msg.querySelector('.fl-widget-container, .fl-lazy-placeholder')) {
           msg.dataset.flProcessed = 'true';
           continue;
@@ -1758,8 +1910,11 @@ function escapeHtml(str) {
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    getPageType,
+    syncPageTypeAttribute,
     extractAllABC,
     extractABC,
+    isAIStreaming,
     isNotebookLMStreaming,
     hasUnclosedFence,
     notesToABC,
@@ -1767,6 +1922,9 @@ if (typeof module !== 'undefined' && module.exports) {
     formatSingleVoiceABC,
     midiToABCPitch,
     formatABCDuration,
+    findActiveInput,
+    findActiveInputContainer,
+    insertTextIntoNotebookLM,
     NotebookLMComposer,
     createPianoRollWidget,
     createLazyPlaceholder,

@@ -3,7 +3,8 @@
  */
 
 (() => {
-  console.log('🎹 [ABC Piano Roll] Extension loaded for Google NotebookLM');
+  const pageType = (typeof getPageType === 'function') ? getPageType() : 'notebook';
+  console.log(`🎹 [ABC Piano Roll v1.1.7] Extension loaded on [${pageType.toUpperCase()}] page:`, window.location.href);
 
   // Start the intelligent debounced DOM watcher
   try {
