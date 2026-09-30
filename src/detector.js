@@ -314,10 +314,32 @@ function createPianoRollWidget(abcString, originalHostElement) {
     }, 1200);
   };
 
+  const downloadMidiBtn = document.createElement('button');
+  downloadMidiBtn.className = 'fl-btn fl-btn-download-midi';
+  downloadMidiBtn.innerHTML = '💾 MIDI';
+  downloadMidiBtn.title = 'Download standard MIDI file (.mid) to your computer';
+  downloadMidiBtn.onclick = () => {
+    try {
+      if (typeof MIDIParser !== 'undefined' && typeof MIDIParser.download === 'function') {
+        MIDIParser.download(musicData);
+      } else if (typeof downloadMIDI === 'function') {
+        downloadMIDI(musicData);
+      }
+      const oldHtml = downloadMidiBtn.innerHTML;
+      downloadMidiBtn.innerHTML = '✔ Saved!';
+      setTimeout(() => {
+        downloadMidiBtn.innerHTML = oldHtml;
+      }, 1200);
+    } catch (err) {
+      console.error('Download MIDI error:', err);
+    }
+  };
+
   leftGroup.appendChild(playBtn);
   leftGroup.appendChild(stopBtn);
   leftGroup.appendChild(lcd);
   leftGroup.appendChild(copyToPianoBtn);
+  leftGroup.appendChild(downloadMidiBtn);
 
   // Right Section: Expression pill + Volume pill + Shortcuts info
   const rightGroup = document.createElement('div');
@@ -1240,10 +1262,38 @@ class NotebookLMComposer {
       this.lcdBpm = lcd.querySelector('.fl-lcd-bpm');
       this.lcdNotes = lcd.querySelector('.fl-lcd-notes');
 
+      const exportMidiBtn = document.createElement('button');
+      exportMidiBtn.className = 'fl-btn fl-btn-download-midi';
+      exportMidiBtn.type = 'button';
+      exportMidiBtn.innerHTML = '💾 Export MIDI';
+      exportMidiBtn.title = 'Export current piano roll score as standard MIDI file (.mid)';
+      exportMidiBtn.onclick = () => {
+        const currentData = this.pianoRoll && this.pianoRoll.musicData;
+        if (!currentData || !currentData.notes || currentData.notes.length === 0) {
+          alert('Piano roll is empty. Draw some notes first!');
+          return;
+        }
+        try {
+          if (typeof MIDIParser !== 'undefined' && typeof MIDIParser.download === 'function') {
+            MIDIParser.download(currentData);
+          } else if (typeof downloadMIDI === 'function') {
+            downloadMIDI(currentData);
+          }
+          const oldHtml = exportMidiBtn.innerHTML;
+          exportMidiBtn.innerHTML = '✔ Saved!';
+          setTimeout(() => {
+            exportMidiBtn.innerHTML = oldHtml;
+          }, 1200);
+        } catch (err) {
+          console.error('Export MIDI error:', err);
+        }
+      };
+
       leftGroup.appendChild(playBtn);
       leftGroup.appendChild(stopBtn);
       leftGroup.appendChild(clearBtn);
       leftGroup.appendChild(loadMidiBtn);
+      leftGroup.appendChild(exportMidiBtn);
       leftGroup.appendChild(midiFileInput);
       leftGroup.appendChild(lcd);
 

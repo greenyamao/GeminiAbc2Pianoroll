@@ -647,4 +647,19 @@
   box-shadow: 0 0 10px rgba(56, 189, 248, 0.3) !important;
 }
 
+/* Download MIDI button */
+.fl-btn-download-midi {
+  background: #192734 !important;
+  border-color: #274059 !important;
+  color: #38bdf8 !important;
+  font-weight: 600 !important;
+}
+
+.fl-btn-download-midi:hover {
+  background: #203547 !important;
+  border-color: #7dd3fc !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.25) !important;
+}
+
 

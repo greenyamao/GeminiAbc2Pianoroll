@@ -291,10 +291,131 @@ function parseMIDI(bufferOrArrayBuffer, options = {}) {
   };
 }
 
+/**
+ * Encodes variable-length quantity (VLQ) for MIDI format
+ */
+function encodeVLQ(val) {
+  let v = Math.max(0, Math.round(val));
+  const buffer = [v & 0x7F];
+  while ((v >>= 7) > 0) {
+    buffer.unshift((v & 0x7F) | 0x80);
+  }
+  return buffer;
+}
+
+/**
+ * Encodes musicData (notes, tempo, meter, title) into standard binary MIDI format (SMF Type 0)
+ * @param {object} musicData
+ * @returns {Uint8Array} Binary MIDI bytes
+ */
+function createMIDI(musicData) {
+  const ppqn = 480;
+  const notes = (musicData && musicData.notes) || [];
+  const tempo = (musicData && musicData.tempo) || 120;
+  const meter = (musicData && musicData.meter) || '4/4';
+  const title = (musicData && (musicData.title || (musicData.header && musicData.header.title))) || 'NotebookLM Score';
+
+  const trackEvents = [];
+
+  // 1. Time Signature Meta Event: 0xFF 0x58 0x04 nn dd cc bb
+  const meterParts = meter.split('/');
+  const num = parseInt(meterParts[0], 10) || 4;
+  const den = parseInt(meterParts[1], 10) || 4;
+  const denPower = Math.round(Math.log2(den)) || 2;
+  trackEvents.push(0x00, 0xFF, 0x58, 0x04, num, denPower, 24, 8);
+
+  // 2. Tempo Meta Event: 0xFF 0x51 0x03 tt tt tt (microseconds per quarter note)
+  const usPerQuarter = Math.round(60000000 / tempo);
+  trackEvents.push(0x00, 0xFF, 0x51, 0x03, (usPerQuarter >> 16) & 0xFF, (usPerQuarter >> 8) & 0xFF, usPerQuarter & 0xFF);
+
+  // 3. Track Name Meta Event
+  const titleBytes = [];
+  for (let i = 0; i < title.length; i++) {
+    const code = title.charCodeAt(i);
+    titleBytes.push(code < 128 ? code : 63); // ASCII-safe track name
+  }
+  trackEvents.push(0x00, 0xFF, 0x03, ...encodeVLQ(titleBytes.length), ...titleBytes);
+
+  // 4. Note Events
+  const events = [];
+  for (const n of notes) {
+    const startTick = Math.max(0, Math.round(n.startBeat * ppqn));
+    const endTick = Math.max(startTick + 1, Math.round((n.startBeat + n.duration) * ppqn));
+    events.push({ tick: startTick, type: 'on', pitch: Math.max(0, Math.min(127, n.pitch)), vel: n.velocity || 90 });
+    events.push({ tick: endTick, type: 'off', pitch: Math.max(0, Math.min(127, n.pitch)), vel: 0 });
+  }
+
+  // Sort: tick ascending; if same tick, 'off' comes before 'on'
+  events.sort((a, b) => a.tick - b.tick || (a.type === 'off' ? -1 : 1));
+
+  let lastTick = 0;
+  for (const ev of events) {
+    const delta = ev.tick - lastTick;
+    lastTick = ev.tick;
+    const deltaBytes = encodeVLQ(delta);
+    if (ev.type === 'on') {
+      trackEvents.push(...deltaBytes, 0x90, ev.pitch, ev.vel);
+    } else {
+      trackEvents.push(...deltaBytes, 0x80, ev.pitch, 0x00);
+    }
+  }
+
+  // 5. End of Track Meta Event: 0xFF 0x2F 0x00
+  trackEvents.push(0x00, 0xFF, 0x2F, 0x00);
+
+  const trackLen = trackEvents.length;
+  const trackChunk = [
+    0x4D, 0x54, 0x72, 0x6B, // 'MTrk'
+    (trackLen >> 24) & 0xFF,
+    (trackLen >> 16) & 0xFF,
+    (trackLen >> 8) & 0xFF,
+    trackLen & 0xFF,
+    ...trackEvents
+  ];
+
+  const headerChunk = [
+    0x4D, 0x54, 0x68, 0x64, // 'MThd'
+    0x00, 0x00, 0x00, 0x06, // length 6
+    0x00, 0x00,             // format 0
+    0x00, 0x01,             // 1 track
+    (ppqn >> 8) & 0xFF,
+    ppqn & 0xFF             // division
+  ];
+
+  return new Uint8Array([...headerChunk, ...trackChunk]);
+}
+
+/**
+ * Browser helper to trigger instant download of a .mid file
+ * @param {object} musicData
+ * @param {string} [filename]
+ */
+function downloadMIDI(musicData, filename) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const bytes = createMIDI(musicData);
+  const blob = new Blob([bytes], { type: 'audio/midi' });
+  const rawTitle = filename || (musicData && (musicData.title || (musicData.header && musicData.header.title))) || 'FL_Score';
+  const cleanName = rawTitle.replace(/[^a-zA-Z0-9_\-\u0400-\u04FF]/g, '_');
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${cleanName}.mid`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    if (a.parentElement) document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, 2000);
+}
+
 if (typeof window !== 'undefined') {
-  window.MIDIParser = { parse: parseMIDI };
+  window.MIDIParser = {
+    parse: parseMIDI,
+    create: createMIDI,
+    download: downloadMIDI
+  };
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { parseMIDI };
+  module.exports = { parseMIDI, createMIDI, downloadMIDI };
 }
