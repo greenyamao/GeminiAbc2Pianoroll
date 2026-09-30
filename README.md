@@ -9,7 +9,12 @@ Browser extension for Google Gemini and NotebookLM that renders ABC music notati
 > [!TIP]
 > **How to prompt Gemini:** Ask the model to output notes in ABC notation (for example: *"write a chord progression in ABC format"* or *"give me the melody in ABC notation"*). The extension detects ABC code blocks and renders them as interactive piano rolls automatically.
 
-Gemini generates musical ideas as text in ABC notation. This extension parses those notes into a visual piano roll, plays them with an acoustic piano soundfont, and provides an editor to draw or import notes and send them back to the chat.
+## Installation
+
+1. Clone or download this repository to your computer.
+2. Open `chrome://extensions` in any Chromium browser (Chrome, Brave, Edge, Opera).
+3. Turn on "Developer mode" (toggle switch in the top right).
+4. Click "Load unpacked" (button in the top left) and select this repository folder.
 
 ## Features
 
@@ -22,13 +27,6 @@ Gemini generates musical ideas as text in ABC notation. This extension parses th
 
 - Gemini (gemini.google.com/app, gemini.google.com/spark)
 - NotebookLM (notebooklm.google.com)
-
-## Installation
-
-1. Clone or download this repository.
-2. Open `chrome://extensions` in any Chromium browser (Chrome, Brave, Edge).
-3. Enable Developer mode.
-4. Click Load unpacked and select the extension directory.
 
 ## Controls
 
