@@ -53,7 +53,7 @@ class PianoRollSynth {
     // Transport & Playback state
     this.isPlaying = false;
     this.isPaused = false;
-    this.playOriginBeat = 0; // FL Studio-style playback start marker / origin
+    this.playOriginBeat = 0; // custom playback start marker / origin
     this.notes = [];
     this.tempo = 120;
     this.loop = true; // Always loop on finish

@@ -1,14 +1,6 @@
 /**
- * FL Studio Style Piano Roll Renderer
- * HTML5 Canvas 2D component matching FL Studio aesthetics:
- * 
- * Fixes & Improvements:
- * - Exact sub-pixel mouse coordinate mapping (solves cursor drift & DPI scale offset).
- * - Compact FL Studio proportions (rowHeight: 16px, zoomX: 38px) — no more over-stretched keys or giant notes.
- * - Musical grid snapping on seek (snaps to 1/4 beat / 16th note steps like in FL Studio).
- * - Fixed ruler hover ghost line: eliminates duplicate/offset orange markers.
- * - Isolated wheel navigation: pure vertical scroll, pure horizontal scroll with Shift, pure zoom with Ctrl.
- * - ResizeObserver for 100% responsive layout sync.
+ * Interactive Piano Roll Renderer
+ * HTML5 Canvas 2D component with responsive layout and playback sync
  */
 
 // Global persistent scale and registry across all piano rolls on the page
@@ -92,7 +84,7 @@ class FLPianoRoll {
     this.musicData = null;
     this.synth = options.synth || null;
     this.editable = !!this.options.editable;
-    this.lastNoteDuration = 1.0; // FL Studio sticky note length
+    this.lastNoteDuration = 1.0; // Piano Roll sticky note length
     this.snapStep = (this.options.snapStep !== undefined) ? this.options.snapStep : 0.25;
     this.isResizingNote = false;
     this.resizingNote = null;
@@ -121,7 +113,7 @@ class FLPianoRoll {
 
     // Playback state
     this.currentBeat = 0;
-    this.playOriginBeat = 0; // FL Studio-style start marker
+    this.playOriginBeat = 0; // custom start marker
     this.activePitches = new Set();
     this.hoveredNote = null;
 
@@ -147,7 +139,7 @@ class FLPianoRoll {
     this.dragStartScrollX = 0;
     this.dragStartScrollY = 0;
 
-    // FL Studio Color Palette
+    // Color Palette
     this.colors = {
       bgDark: '#1a242c',
       bgLight: '#212d37',
@@ -165,10 +157,10 @@ class FLPianoRoll {
       keyWhiteBorder: '#9da7b0',
       keyBlack: '#23282e',
       keyBlackBorder: '#14171a',
-      keyActive: '#ff851b', // FL Studio warm orange active highlight
+      keyActive: '#ff851b', // warm orange active highlight
       keyActiveText: '#ffffff',
       keyLabel: '#556270',
-      noteBg: '#8fe3a2', // FL Studio mint green
+      noteBg: '#8fe3a2', // mint green
       noteBorder: '#489d5f',
       noteText: '#13391d',
       noteHover: '#b5f5c4',
@@ -476,7 +468,7 @@ class FLPianoRoll {
       const x = pos.x;
       const y = pos.y;
 
-      // 0a. Right Click on existing note in editable mode -> Delete Note (FL Studio behavior)
+      // 0a. Right Click on existing note in editable mode -> Delete Note (interactive behavior)
       if (e.button === 2 && this.editable && this.musicData && this.musicData.notes) {
         const noteToDelete = this.findNoteAt(x, y);
         if (noteToDelete) {
@@ -593,7 +585,7 @@ class FLPianoRoll {
             return;
           }
 
-          // Clicked note body: start moving note in FL Studio style!
+          // Clicked note body: start moving note in standard!
           this.isMovingNote = true;
           this.movingNote = clickedNote;
           this.moveStartMouseX = x;
@@ -616,7 +608,7 @@ class FLPianoRoll {
 
       // 5. Left Click on empty grid area
       if (this.editable && x > kw && x < this.width - vsw && y > rh && y < sbY) {
-        // Draw note immediately in FL Studio style with cell snapping and strict quantization!
+        // Draw note immediately in standard with cell snapping and strict quantization!
         const pitch = this.pitchAtY(y);
         const step = this.snapStep || 0.25;
         const beat = this.beatAtX(x, 'floor');
@@ -758,7 +750,7 @@ class FLPianoRoll {
         }
       }
 
-      // Active note dragging / moving (FL Studio note movement with pitch and beat snapping)
+      // Active note dragging / moving (Piano Roll note movement with pitch and beat snapping)
       if (this.isMovingNote && this.movingNote) {
         const dx = x - this.moveStartMouseX;
         const deltaBeats = dx / this.zoomX;
@@ -794,7 +786,7 @@ class FLPianoRoll {
         return;
       }
 
-      // Active note resizing (FL Studio right-edge drag with snapping)
+      // Active note resizing (Piano Roll right-edge drag with snapping)
       if (this.isResizingNote && this.resizingNote) {
         const step = this.snapStep || 0.25;
         const currentRawBeat = (x - kw + this.scrollX) / this.zoomX;
@@ -917,21 +909,21 @@ class FLPianoRoll {
       }
     });
 
-    // WHEEL SCROLLING & ZOOMING (FL Studio behavior)
+    // WHEEL SCROLLING & ZOOMING (interactive behavior)
     this.canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       const pos = this.getCanvasMousePos(e);
       const kw = this.options.keyboardWidth;
       const rh = this.options.rulerHeight;
 
-      // 1. Wheel over Piano Keyboard on the left -> Vertical Zoom (FL Studio behavior!)
+      // 1. Wheel over Piano Keyboard on the left -> Vertical Zoom (interactive behavior!)
       if (pos.x <= kw) {
         const delta = e.deltaY < 0 ? 2 : -2;
         this.setZoomY(delta);
         return;
       }
 
-      // 2. Wheel over Timeline Ruler at top -> Horizontal Zoom (FL Studio behavior!)
+      // 2. Wheel over Timeline Ruler at top -> Horizontal Zoom (interactive behavior!)
       if (pos.y <= rh && pos.x > kw) {
         const delta = e.deltaY < 0 ? 6 : -6;
         this.setZoom(delta);
@@ -1089,7 +1081,7 @@ class FLPianoRoll {
     // 2. Measure and Beat Grid Lines
     this.drawGridLines(kw, rh, gridH);
 
-    // 2b. Ghost Note preview on hover (FL Studio pencil snap indicator)
+    // 2b. Ghost Note preview on hover (Piano Roll pencil snap indicator)
     this.drawGhostNote(kw, rh, gridH);
 
     // 3. Notes
@@ -1107,7 +1099,7 @@ class FLPianoRoll {
     // 7. Bottom Scrollbar
     this.drawScrollbar(kw, this.height - sh, sh);
 
-    // 8. Right Vertical Scrollbar (FL Studio vertical overview)
+    // 8. Right Vertical Scrollbar (Piano Roll vertical overview)
     this.drawVerticalScrollbar(vsw, rh, gridH);
   }
 
@@ -1164,7 +1156,7 @@ class FLPianoRoll {
         this.ctx.stroke();
       }
 
-      // Draw FL Studio sub-beat 8th and 16th step lines
+      // Draw Piano Roll sub-beat 8th and 16th step lines
       if (b < totalBeats && this.zoomX >= 22) {
         // 1/4 step (16th note)
         const x1 = this.xAtBeat(b + 0.25);
@@ -1322,7 +1314,7 @@ class FLPianoRoll {
         // Black key (width: 65% of kw)
         const blackW = Math.round(kw * 0.65);
         if (isActive) {
-          // FL Studio: ONLY the black key itself lights up in orange!
+          // Piano Roll: ONLY the black key itself lights up in orange!
           this.ctx.fillStyle = this.colors.keyActive;
           this.ctx.fillRect(0, y, blackW, this.rowHeight);
           this.ctx.strokeStyle = '#d35400';

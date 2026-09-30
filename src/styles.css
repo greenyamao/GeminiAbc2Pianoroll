@@ -1,4 +1,4 @@
-/* FL Studio DAW Theme & Piano Roll Widget Styles */
+/* Piano Roll Theme & Widget Styles */
 
 :root {
   --fl-bg-panel: #182026;
@@ -48,7 +48,7 @@
   flex-shrink: 0;
 }
 
-/* FL Studio Recessed LCD Display Panel */
+/* Recessed LCD Display Panel */
 .fl-lcd {
   display: inline-flex;
   align-items: center;
@@ -402,7 +402,7 @@
   color: #38bdf8;
 }
 
-/* FL Studio Chat Composer Modal Window */
+/* Chat Composer Modal Window */
 .fl-composer-modal-overlay {
   position: fixed;
   inset: 0;

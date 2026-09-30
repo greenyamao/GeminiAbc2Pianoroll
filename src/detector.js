@@ -260,7 +260,7 @@ function extractABC(text) {
 
 /**
  * Creates a lightweight placeholder for historical messages off-screen.
- * Replaces itself with a full FL Studio Piano Roll when scrolled into view or clicked.
+ * Replaces itself with a Piano Roll when scrolled into view or clicked.
  */
 function createLazyPlaceholder(abcString, originalHostElement) {
   const musicData = parseABC(abcString);
@@ -318,7 +318,7 @@ function createLazyPlaceholder(abcString, originalHostElement) {
 }
 
 /**
- * Creates an interactive FL Studio Piano Roll widget element with compact toolbar
+ * Creates an interactive Piano Roll widget element with compact toolbar
  */
 function createPianoRollWidget(abcString, originalHostElement) {
   const musicData = parseABC(abcString);
@@ -331,11 +331,11 @@ function createPianoRollWidget(abcString, originalHostElement) {
   widget.dataset.attachedAbc = 'true';
   widget.dataset.abcSnippet = abcString.slice(0, 40).replace(/\s+/g, '_');
 
-  // Compact Single-Row Toolbar (Ultra-clean DAW transport bar)
+  // Compact Single-Row Toolbar
   const toolbar = document.createElement('div');
   toolbar.className = 'fl-toolbar';
 
-  // Left Section: Playback controls + FL Studio Recessed LCD display
+  // Left Section: Playback controls + LCD display
   const leftGroup = document.createElement('div');
   leftGroup.className = 'fl-toolbar-left';
 
@@ -1274,7 +1274,7 @@ class NotebookLMComposer {
       this.toggleBtn.className = 'fl-input-composer-btn';
       this.toggleBtn.type = 'button';
       this.toggleBtn.innerHTML = '🎹 Piano Roll';
-      this.toggleBtn.title = `Open interactive FL Studio Piano Roll composer [${pageType.toUpperCase()}]`;
+      this.toggleBtn.title = 'Open Piano Roll';
       this.toggleBtn.onclick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -1320,7 +1320,7 @@ class NotebookLMComposer {
       const modalWindow = document.createElement('div');
       modalWindow.className = 'fl-composer-modal-window';
 
-      // Header with Title and Close button (Minimalist FL Studio style)
+      // Header with Title and Close button (Minimalist style)
       const modalHeader = document.createElement('div');
       modalHeader.className = 'fl-modal-header';
       modalHeader.innerHTML = `
@@ -1460,7 +1460,7 @@ class NotebookLMComposer {
 
       const snapPill = document.createElement('div');
       snapPill.className = 'fl-tool-pill';
-      snapPill.title = 'Grid Snap (FL Studio Magnet)';
+      snapPill.title = 'Grid Snap';
       snapPill.innerHTML = `
         <span class="fl-tool-icon">🧲</span>
         <select class="fl-snap-select" title="Grid Snap Step">

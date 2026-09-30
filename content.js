@@ -4,7 +4,7 @@
 
 (() => {
   const pageType = (typeof getPageType === 'function') ? getPageType() : 'notebook';
-  console.log(`🎹 [ABC Piano Roll v1.1.8] Extension loaded on [${pageType.toUpperCase()}] page:`, window.location.href);
+  console.log(`🎹 [ABC Piano Roll v1.1.9] Extension loaded on [${pageType.toUpperCase()}] page:`, window.location.href);
 
   // Start the intelligent debounced DOM watcher
   try {
