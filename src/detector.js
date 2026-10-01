@@ -13,7 +13,7 @@ try {
     globalVolume = parseFloat(localStorage.getItem('nlm_fl_volume') || '0.7');
     globalExpression = localStorage.getItem('nlm_fl_expression') || 'balanced';
   }
-} catch (e) {}
+} catch (e) { }
 
 // Global IntersectionObserver for lazy-loading off-screen piano rolls in long chats
 let lazyObserver = null;
@@ -276,7 +276,6 @@ function createLazyPlaceholder(abcString, originalHostElement) {
 
   placeholder.innerHTML = `
     <div class="fl-lazy-left">
-      <span class="fl-lazy-icon">🎹</span>
       <div class="fl-lcd" style="height:21px; padding:1px 6px;">
         <span class="fl-lcd-key">${escapeHtml(key)}</span>
         <span class="fl-lcd-sep"></span>
@@ -285,9 +284,9 @@ function createLazyPlaceholder(abcString, originalHostElement) {
         <span class="fl-lcd-bpm">${tempo}<small>BPM</small></span>
       </div>
       <span class="fl-lazy-title">${escapeHtml(title)}</span>
-      <span class="fl-lazy-sub">• Scroll or click to load</span>
+      <span class="fl-lazy-sub">- Scroll or click to load</span>
     </div>
-    <button class="fl-lazy-btn">⚡ Load</button>
+    <button class="fl-lazy-btn">Load</button>
   `;
 
   let isHydrated = false;
@@ -341,11 +340,11 @@ function createPianoRollWidget(abcString, originalHostElement) {
 
   const playBtn = document.createElement('button');
   playBtn.className = 'fl-btn fl-btn-play';
-  playBtn.innerHTML = '▶ Play';
+  playBtn.innerHTML = 'Play';
 
   const stopBtn = document.createElement('button');
   stopBtn.className = 'fl-btn fl-btn-stop';
-  stopBtn.innerHTML = '⏹';
+  stopBtn.innerHTML = 'Stop';
   stopBtn.title = 'Stop and rewind to beginning';
 
   const lcd = document.createElement('div');
@@ -361,7 +360,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
 
   const copyToPianoBtn = document.createElement('button');
   copyToPianoBtn.className = 'fl-btn fl-btn-copy-to-piano';
-  copyToPianoBtn.innerHTML = '🎹 Copy to Piano';
+  copyToPianoBtn.innerHTML = 'Copy to Piano';
   copyToPianoBtn.title = 'Copy notes directly into your editable Piano Roll (replaces existing notes)';
   copyToPianoBtn.onclick = () => {
     if (synth && synth.isPlaying) {
@@ -375,7 +374,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
     activeComposer.loadScore(musicData);
 
     const oldHtml = copyToPianoBtn.innerHTML;
-    copyToPianoBtn.innerHTML = '✔ Copied!';
+    copyToPianoBtn.innerHTML = 'Copied!';
     setTimeout(() => {
       copyToPianoBtn.innerHTML = oldHtml;
     }, 1200);
@@ -383,7 +382,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
 
   const downloadMidiBtn = document.createElement('button');
   downloadMidiBtn.className = 'fl-btn fl-btn-download-midi';
-  downloadMidiBtn.innerHTML = '💾 MIDI';
+  downloadMidiBtn.innerHTML = 'MIDI';
   downloadMidiBtn.title = 'Download standard MIDI file (.mid) to your computer';
   downloadMidiBtn.onclick = () => {
     try {
@@ -393,7 +392,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
         downloadMIDI(musicData);
       }
       const oldHtml = downloadMidiBtn.innerHTML;
-      downloadMidiBtn.innerHTML = '✔ Saved!';
+      downloadMidiBtn.innerHTML = 'Saved!';
       setTimeout(() => {
         downloadMidiBtn.innerHTML = oldHtml;
       }, 1200);
@@ -417,7 +416,6 @@ function createPianoRollWidget(abcString, originalHostElement) {
   exprPill.className = 'fl-tool-pill';
   exprPill.title = 'Piano Expression Dynamics (Hammer Velocity)';
   exprPill.innerHTML = `
-    <span class="fl-tool-icon">🎹</span>
     <select class="fl-expr-select" title="Expression & Dynamics">
       <option value="soft" ${globalExpression === 'soft' ? 'selected' : ''}>Soft (Velvet)</option>
       <option value="balanced" ${globalExpression === 'balanced' ? 'selected' : ''}>Balanced</option>
@@ -431,18 +429,16 @@ function createPianoRollWidget(abcString, originalHostElement) {
   volPill.className = 'fl-tool-pill';
   volPill.title = 'Master Volume';
   volPill.innerHTML = `
-    <span class="fl-tool-icon">🔊</span>
     <input type="range" class="fl-vol-slider" min="0" max="1" step="0.05" value="${globalVolume}" title="Master Volume">
   `;
   const volSlider = volPill.querySelector('.fl-vol-slider');
 
-  // Vertical Zoom Pill (↕ Zoom buttons)
+  // Vertical Zoom Pill (Zoom buttons)
   const zoomPill = document.createElement('div');
   zoomPill.className = 'fl-tool-pill fl-zoom-pill';
-  zoomPill.title = 'Vertical Zoom (Key Height)\n• Click − / + to scale\n• Or scroll wheel over the piano keys!';
+  zoomPill.title = 'Vertical Zoom (Key Height)\n- Click - / + to scale\n- Or scroll wheel over the piano keys';
   zoomPill.innerHTML = `
-    <span class="fl-tool-icon">↕</span>
-    <button type="button" class="fl-btn-mini fl-zoom-btn-out" title="Make keys smaller (−)">−</button>
+    <button type="button" class="fl-btn-mini fl-zoom-btn-out" title="Make keys smaller (-)">-</button>
     <button type="button" class="fl-btn-mini fl-zoom-btn-in" title="Make keys taller (+)">+</button>
   `;
   zoomPill.querySelector('.fl-zoom-btn-out').onclick = (e) => {
@@ -454,11 +450,11 @@ function createPianoRollWidget(abcString, originalHostElement) {
     pianoRoll.setZoomY(2);
   };
 
-  // Shortcuts Info Button (Icon with rich multi-line tooltip)
+  // Shortcuts Info Button
   const shortcutsBtn = document.createElement('button');
   shortcutsBtn.className = 'fl-btn fl-btn-icon';
-  shortcutsBtn.innerHTML = '⌨';
-  shortcutsBtn.title = 'Navigation & Shortcuts:\n• Wheel over Keys: Vertical Zoom (Key height)\n• Wheel over Ruler: Horizontal Zoom (Time)\n• Wheel over Grid: Vertical Scroll\n• Ctrl + Wheel: Horizontal Zoom\n• Shift + Wheel: Horizontal Scroll\n• Drag bottom bar: Resize height\n• Space: Play / Pause';
+  shortcutsBtn.innerHTML = '?';
+  shortcutsBtn.title = 'Navigation & Shortcuts:\n- Wheel over Keys: Vertical Zoom (Key height)\n- Wheel over Ruler: Horizontal Zoom (Time)\n- Wheel over Grid: Vertical Scroll\n- Ctrl + Wheel: Horizontal Zoom\n- Shift + Wheel: Horizontal Scroll\n- Drag bottom bar: Resize height\n- Space: Play / Pause';
 
   rightGroup.appendChild(zoomPill);
   rightGroup.appendChild(exprPill);
@@ -532,7 +528,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
   };
 
   synth.onEnded = () => {
-    playBtn.innerHTML = '▶ Play';
+    playBtn.innerHTML = 'Play';
     playBtn.classList.remove('is-playing');
     pianoRoll.seekTo(synth.playOriginBeat !== undefined ? synth.playOriginBeat : 0);
   };
@@ -560,11 +556,11 @@ function createPianoRollWidget(abcString, originalHostElement) {
         startBeat = 0;
       }
       synth.play(musicData.notes, musicData.tempo, true, musicData.totalBeats, startBeat);
-      playBtn.innerHTML = '⏸ Pause';
+      playBtn.innerHTML = 'Pause';
       playBtn.classList.add('is-playing');
     } else {
       synth.pause();
-      playBtn.innerHTML = '▶ Play';
+      playBtn.innerHTML = 'Play';
       playBtn.classList.remove('is-playing');
     }
   };
@@ -581,7 +577,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('nlm_fl_volume', val.toString());
       }
-    } catch (err) {}
+    } catch (err) { }
     synth.setVolume(val);
   };
 
@@ -592,7 +588,7 @@ function createPianoRollWidget(abcString, originalHostElement) {
       if (typeof localStorage !== 'undefined') {
         localStorage.setItem('nlm_fl_expression', val);
       }
-    } catch (err) {}
+    } catch (err) { }
     synth.setExpression(val);
   };
 
@@ -643,14 +639,14 @@ function isMessageWrapper(el) {
   if (!el || el === document.body || el === document.documentElement) return true;
   const tag = (el.tagName || '').toLowerCase();
   if (['model-response', 'response-container', 'message-content', 'markdown',
-       'chat-message', 'conversation-turn', 'user-query', 'main', 'section', 'article'].includes(tag)) {
+    'chat-message', 'conversation-turn', 'user-query', 'main', 'section', 'article'].includes(tag)) {
     return true;
   }
   const cls = (typeof el.className === 'string') ? el.className.toLowerCase() : '';
   if (cls.includes('message-content') || cls.includes('response-container') ||
-      cls.includes('model-response') || cls.includes('conversation-turn') ||
-      cls.includes('chat-message') || cls.includes('chat-turn') ||
-      cls.includes('markdown')) {
+    cls.includes('model-response') || cls.includes('conversation-turn') ||
+    cls.includes('chat-message') || cls.includes('chat-turn') ||
+    cls.includes('markdown')) {
     return true;
   }
   // Any container with multiple paragraphs or code blocks is a parent wrapper, not an individual block
@@ -658,7 +654,7 @@ function isMessageWrapper(el) {
     if (el.querySelectorAll('p, pre, code-block, blockquote').length > 1) {
       return true;
     }
-  } catch (e) {}
+  } catch (e) { }
   return false;
 }
 
@@ -1131,7 +1127,7 @@ function findActiveInputContainer() {
     try {
       const el = document.querySelector(sel);
       if (el) return el;
-    } catch (e) {}
+    } catch (e) { }
   }
 
   return null;
@@ -1184,7 +1180,7 @@ function insertTextIntoNotebookLM(textToInsert) {
         inputType: 'insertText',
         data: textToInsert
       }));
-    } catch (e) {}
+    } catch (e) { }
 
     // Enable NotebookLM submit button
     const form = input.closest('form');
@@ -1229,7 +1225,7 @@ function insertTextIntoNotebookLM(textToInsert) {
         inputType: 'insertText',
         data: textToInsert
       }));
-    } catch (e) {}
+    } catch (e) { }
 
     // Enable Gemini send button
     const sendBtn = document.querySelector(
@@ -1273,7 +1269,7 @@ class NotebookLMComposer {
       this.toggleBtn = document.createElement('button');
       this.toggleBtn.className = 'fl-input-composer-btn';
       this.toggleBtn.type = 'button';
-      this.toggleBtn.innerHTML = '🎹 Piano Roll';
+      this.toggleBtn.innerHTML = 'Piano Roll';
       this.toggleBtn.title = 'Open Piano Roll';
       this.toggleBtn.onclick = (e) => {
         e.preventDefault();
@@ -1325,9 +1321,9 @@ class NotebookLMComposer {
       modalHeader.className = 'fl-modal-header';
       modalHeader.innerHTML = `
         <div class="fl-modal-title-group">
-          <span class="fl-modal-title">🎹 Piano Roll</span>
+          <span class="fl-modal-title">Piano Roll</span>
         </div>
-        <button type="button" class="fl-modal-close-btn" title="Close (Esc)">✕</button>
+        <button type="button" class="fl-modal-close-btn" title="Close (Esc)">x</button>
       `;
       modalHeader.querySelector('.fl-modal-close-btn').onclick = () => this.toggle(false);
 
@@ -1342,24 +1338,24 @@ class NotebookLMComposer {
       const playBtn = document.createElement('button');
       playBtn.className = 'fl-btn fl-btn-play';
       playBtn.type = 'button';
-      playBtn.innerHTML = '▶ Play';
+      playBtn.innerHTML = 'Play';
 
       const stopBtn = document.createElement('button');
       stopBtn.className = 'fl-btn fl-btn-stop';
       stopBtn.type = 'button';
-      stopBtn.innerHTML = '⏹';
+      stopBtn.innerHTML = 'Stop';
       stopBtn.title = 'Stop and rewind';
 
       const clearBtn = document.createElement('button');
       clearBtn.className = 'fl-btn fl-btn-icon fl-btn-clear';
       clearBtn.type = 'button';
-      clearBtn.innerHTML = '🗑 Clear';
+      clearBtn.innerHTML = 'Clear';
       clearBtn.title = 'Clear piano roll notes';
 
       const loadMidiBtn = document.createElement('button');
       loadMidiBtn.className = 'fl-btn fl-btn-load-midi';
       loadMidiBtn.type = 'button';
-      loadMidiBtn.innerHTML = '📁 Load MIDI';
+      loadMidiBtn.innerHTML = 'Load MIDI';
       loadMidiBtn.title = 'Import standard MIDI file (.mid, .midi) with strict musical quantization';
 
       const midiFileInput = document.createElement('input');
@@ -1392,7 +1388,7 @@ class NotebookLMComposer {
             this.loadScore(parsedData);
 
             const oldHtml = loadMidiBtn.innerHTML;
-            loadMidiBtn.innerHTML = '✔ Loaded!';
+            loadMidiBtn.innerHTML = 'Loaded!';
             setTimeout(() => { loadMidiBtn.innerHTML = oldHtml; }, 1500);
           } catch (err) {
             console.error('MIDI parse error:', err);
@@ -1422,7 +1418,7 @@ class NotebookLMComposer {
       const exportMidiBtn = document.createElement('button');
       exportMidiBtn.className = 'fl-btn fl-btn-download-midi';
       exportMidiBtn.type = 'button';
-      exportMidiBtn.innerHTML = '💾 Export MIDI';
+      exportMidiBtn.innerHTML = 'Export MIDI';
       exportMidiBtn.title = 'Export current piano roll score as standard MIDI file (.mid)';
       exportMidiBtn.onclick = () => {
         const currentData = this.pianoRoll && this.pianoRoll.musicData;
@@ -1437,7 +1433,7 @@ class NotebookLMComposer {
             downloadMIDI(currentData);
           }
           const oldHtml = exportMidiBtn.innerHTML;
-          exportMidiBtn.innerHTML = '✔ Saved!';
+          exportMidiBtn.innerHTML = 'Saved!';
           setTimeout(() => {
             exportMidiBtn.innerHTML = oldHtml;
           }, 1200);
@@ -1462,7 +1458,6 @@ class NotebookLMComposer {
       snapPill.className = 'fl-tool-pill';
       snapPill.title = 'Grid Snap';
       snapPill.innerHTML = `
-        <span class="fl-tool-icon">🧲</span>
         <select class="fl-snap-select" title="Grid Snap Step">
           <option value="0.25" selected>1/4 Step</option>
           <option value="0.5">1/2 Beat</option>
@@ -1484,7 +1479,6 @@ class NotebookLMComposer {
       exprPill.className = 'fl-tool-pill';
       exprPill.title = 'Piano Expression Dynamics';
       exprPill.innerHTML = `
-        <span class="fl-tool-icon">🎹</span>
         <select class="fl-expr-select">
           <option value="soft" ${globalExpression === 'soft' ? 'selected' : ''}>Soft</option>
           <option value="balanced" ${globalExpression === 'balanced' ? 'selected' : ''}>Balanced</option>
@@ -1496,16 +1490,14 @@ class NotebookLMComposer {
       volPill.className = 'fl-tool-pill';
       volPill.title = 'Master Volume';
       volPill.innerHTML = `
-        <span class="fl-tool-icon">🔊</span>
         <input type="range" class="fl-vol-slider" min="0" max="1" step="0.05" value="${globalVolume}">
       `;
 
       const zoomPill = document.createElement('div');
       zoomPill.className = 'fl-tool-pill fl-zoom-pill';
-      zoomPill.title = 'Vertical Zoom (Key Height)\n• Click − / + to scale\n• Or scroll wheel over the piano keys!';
+      zoomPill.title = 'Vertical Zoom (Key Height)\n- Click - / + to scale\n- Or scroll wheel over the piano keys';
       zoomPill.innerHTML = `
-        <span class="fl-tool-icon">↕</span>
-        <button type="button" class="fl-btn-mini fl-zoom-btn-out" title="Make keys smaller (−)">−</button>
+        <button type="button" class="fl-btn-mini fl-zoom-btn-out" title="Make keys smaller (-)">-</button>
         <button type="button" class="fl-btn-mini fl-zoom-btn-in" title="Make keys taller (+)">+</button>
       `;
       zoomPill.querySelector('.fl-zoom-btn-out').onclick = (e) => {
@@ -1607,7 +1599,7 @@ class NotebookLMComposer {
       };
 
       this.synth.onEnded = () => {
-        playBtn.innerHTML = '▶ Play';
+        playBtn.innerHTML = 'Play';
         playBtn.classList.remove('is-playing');
         this.pianoRoll.seekTo(this.synth.playOriginBeat !== undefined ? this.synth.playOriginBeat : 0);
       };
@@ -1634,11 +1626,11 @@ class NotebookLMComposer {
           if (startBeat >= totalBeats - 0.05) startBeat = 0;
 
           this.synth.play(notes, tempo, true, totalBeats, startBeat);
-          playBtn.innerHTML = '⏸ Pause';
+          playBtn.innerHTML = 'Pause';
           playBtn.classList.add('is-playing');
         } else {
           this.synth.pause();
-          playBtn.innerHTML = '▶ Play';
+          playBtn.innerHTML = 'Play';
           playBtn.classList.remove('is-playing');
         }
       };
@@ -1656,14 +1648,14 @@ class NotebookLMComposer {
       exprPill.querySelector('.fl-expr-select').onchange = (e) => {
         const val = e.target.value;
         globalExpression = val;
-        try { localStorage.setItem('nlm_fl_expression', val); } catch (err) {}
+        try { localStorage.setItem('nlm_fl_expression', val); } catch (err) { }
         this.synth.setExpression(val);
       };
 
       volPill.querySelector('.fl-vol-slider').oninput = (e) => {
         const val = parseFloat(e.target.value);
         globalVolume = val;
-        try { localStorage.setItem('nlm_fl_volume', val.toString()); } catch (err) {}
+        try { localStorage.setItem('nlm_fl_volume', val.toString()); } catch (err) { }
         this.synth.setVolume(val);
       };
     }
@@ -1807,10 +1799,10 @@ class NotebookLMWatcher {
         for (const node of m.addedNodes) {
           if (node.nodeType === Node.ELEMENT_NODE) {
             if (node.classList?.contains('fl-widget-container') ||
-                node.classList?.contains('fl-lazy-placeholder') ||
-                node.classList?.contains('fl-composer-modal-overlay') ||
-                node.classList?.contains('fl-composer-drawer') ||
-                node.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) {
+              node.classList?.contains('fl-lazy-placeholder') ||
+              node.classList?.contains('fl-composer-modal-overlay') ||
+              node.classList?.contains('fl-composer-drawer') ||
+              node.closest?.('.fl-widget-container, .fl-lazy-placeholder, .fl-composer-modal-overlay, .fl-composer-drawer')) {
               continue;
             }
 

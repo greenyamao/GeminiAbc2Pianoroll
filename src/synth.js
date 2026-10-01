@@ -203,7 +203,7 @@ class PianoRollSynth {
         }
 
         sharedSampler = piano;
-        console.log('🎹 Steinway Concert Grand Piano (smplr) successfully loaded and active!');
+        console.log('Steinway Concert Grand Piano (smplr) successfully loaded and active.');
       } catch (err) {
         console.warn('Steinway smplr loading error, keeping procedural fallback:', err);
       } finally {

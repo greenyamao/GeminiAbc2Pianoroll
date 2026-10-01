@@ -26,7 +26,7 @@
   max-width: 100%;
 }
 
-/* Toolbar — Compact Single-Row Pro Layout */
+/* Toolbar: Compact Single-Row Pro Layout */
 .fl-toolbar {
   display: flex;
   flex-wrap: nowrap;
