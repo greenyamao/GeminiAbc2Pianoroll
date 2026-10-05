@@ -37,6 +37,3 @@ Browser extension for Google Gemini and NotebookLM that renders ABC music notati
 - Right click: Delete note
 - Drag note edge: Resize note
 
-## License
-
-MIT
